@@ -157,7 +157,7 @@ func TestRequestDecodeError(t *testing.T) {
 			if err := json.Unmarshal(bytes.TrimSpace(p), &request); err != nil {
 				return err
 			}
-			client.resolvePending(json.RawMessage(strconvKey(request.ID)), rpcResult{
+			client.resolvePending(request.ID, rpcResult{
 				result: json.RawMessage(`{"broken"`),
 			})
 			return nil
@@ -211,12 +211,15 @@ func TestHandleServerRequestErrorResponses(t *testing.T) {
 		client.stdin = writer
 
 		client.handleServerRequest(
-			json.RawMessage(`"req-1"`),
+			1,
 			"item/commandExecution/requestApproval",
 			params,
 		)
 
 		response := decodeResponseLine(t, writer.writes)
+		if response.ID != 1 {
+			t.Fatalf("response.ID = %d, want %d", response.ID, 1)
+		}
 		if response.Error == nil {
 			t.Fatal("response.Error = nil, want JSON-RPC error")
 		}
@@ -243,12 +246,15 @@ func TestHandleServerRequestErrorResponses(t *testing.T) {
 		client.stdin = writer
 
 		client.handleServerRequest(
-			json.RawMessage(`"req-2"`),
+			2,
 			"item/commandExecution/requestApproval",
 			params,
 		)
 
 		response := decodeResponseLine(t, writer.writes)
+		if response.ID != 2 {
+			t.Fatalf("response.ID = %d, want %d", response.ID, 2)
+		}
 		if response.Error == nil {
 			t.Fatal("response.Error = nil, want JSON-RPC error")
 		}

@@ -165,6 +165,13 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 	}
 
 	lines := readLogLines(t, logPath)
+	var firstEntry map[string]any
+	if err := json.Unmarshal(lines[0], &firstEntry); err != nil {
+		t.Fatalf("json.Unmarshal(first log line) error = %v", err)
+	}
+	if _, ok := firstEntry["id"].(float64); !ok {
+		t.Fatalf("first request id type = %T, want JSON number", firstEntry["id"])
+	}
 	methods := logMethods(t, lines)
 	wantMethods := []string{
 		"initialize",
@@ -284,8 +291,8 @@ func TestApprovalHandlerRespondsToServerRequest(t *testing.T) {
 	}
 
 	waitForLogEntry(t, logPath, func(entry map[string]any) bool {
-		id, _ := entry["id"].(string)
-		if id != "approval-1" {
+		id, _ := entry["id"].(float64)
+		if id != 1 {
 			return false
 		}
 		result, ok := entry["result"].(map[string]any)
@@ -415,7 +422,7 @@ func TestHelperProcess(t *testing.T) {
 			switch scenario {
 			case "approval":
 				mustEncode(writer, map[string]any{
-					"id":     "approval-1",
+					"id":     1,
 					"method": "item/commandExecution/requestApproval",
 					"params": map[string]any{
 						"itemId":   "item-1",

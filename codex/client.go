@@ -59,7 +59,7 @@ type UnknownPayload struct {
 
 // ServerRequest is a decoded server-initiated JSON-RPC request.
 type ServerRequest struct {
-	ID      json.RawMessage
+	ID      int64
 	Method  string
 	Payload any
 }
@@ -83,7 +83,7 @@ type Client struct {
 	waitCh  chan error
 
 	pendingMu sync.Mutex
-	pending   map[string]chan rpcResult
+	pending   map[int64]chan rpcResult
 
 	notifications chan Notification
 
@@ -93,21 +93,21 @@ type Client struct {
 	readErrMu sync.RWMutex
 	readErr   error
 
-	nextID atomic.Uint64
+	nextID atomic.Int64
 
 	closeOnce sync.Once
 }
 
 type rpcEnvelope struct {
-	ID     *json.RawMessage `json:"id,omitempty"`
-	Method string           `json:"method,omitempty"`
-	Params json.RawMessage  `json:"params,omitempty"`
-	Result json.RawMessage  `json:"result,omitempty"`
-	Error  *JSONRPCError    `json:"error,omitempty"`
+	ID     *int64          `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *JSONRPCError   `json:"error,omitempty"`
 }
 
 type rpcRequest struct {
-	ID     string `json:"id"`
+	ID     int64  `json:"id"`
 	Method string `json:"method"`
 	Params any    `json:"params"`
 }
@@ -118,9 +118,9 @@ type rpcNotification struct {
 }
 
 type rpcResponse struct {
-	ID     json.RawMessage `json:"id"`
-	Result any             `json:"result,omitempty"`
-	Error  *JSONRPCError   `json:"error,omitempty"`
+	ID     int64         `json:"id"`
+	Result any           `json:"result,omitempty"`
+	Error  *JSONRPCError `json:"error,omitempty"`
 }
 
 type rpcResult struct {
@@ -154,7 +154,7 @@ func NewClient(config Config) *Client {
 		config:        config,
 		clientCtx:     clientCtx,
 		clientCancel:  cancel,
-		pending:       make(map[string]chan rpcResult),
+		pending:       make(map[int64]chan rpcResult),
 		notifications: make(chan Notification, config.NotificationBuffer),
 		waitCh:        make(chan error, 1),
 	}
@@ -333,11 +333,10 @@ func (c *Client) Request(ctx context.Context, method string, params any, out any
 		params = map[string]any{}
 	}
 
-	requestID := fmt.Sprintf("codex-go-%d", c.nextID.Add(1))
-	key := strconvKey(requestID)
+	requestID := c.nextID.Add(1)
 	resultCh := make(chan rpcResult, 1)
-	c.registerPending(key, resultCh)
-	defer c.unregisterPending(key)
+	c.registerPending(requestID, resultCh)
+	defer c.unregisterPending(requestID)
 
 	if err := c.writeJSON(rpcRequest{
 		ID:     requestID,
@@ -656,11 +655,12 @@ func (c *Client) handleRawLine(line []byte) error {
 		return nil
 	}
 	if message.ID != nil {
+		requestID := *message.ID
 		var err error
 		if message.Error != nil {
 			err = message.Error
 		}
-		c.resolvePending(*message.ID, rpcResult{
+		c.resolvePending(requestID, rpcResult{
 			result: append(json.RawMessage(nil), message.Result...),
 			err:    err,
 		})
@@ -668,9 +668,9 @@ func (c *Client) handleRawLine(line []byte) error {
 	return nil
 }
 
-func (c *Client) handleServerRequest(id json.RawMessage, method string, params json.RawMessage) {
+func (c *Client) handleServerRequest(id int64, method string, params json.RawMessage) {
 	request := ServerRequest{
-		ID:      append(json.RawMessage(nil), id...),
+		ID:      id,
 		Method:  method,
 		Payload: decodeKnownPayload(method, params, protocol.ServerRequestFactories),
 	}
@@ -746,25 +746,23 @@ func (c *Client) stderrTail() string {
 	return strings.Join(c.stderrLines, "\n")
 }
 
-func (c *Client) registerPending(key string, resultCh chan rpcResult) {
+func (c *Client) registerPending(requestID int64, resultCh chan rpcResult) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	c.pending[key] = resultCh
+	c.pending[requestID] = resultCh
 }
 
-func (c *Client) unregisterPending(key string) {
+func (c *Client) unregisterPending(requestID int64) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	delete(c.pending, key)
+	delete(c.pending, requestID)
 }
 
-func (c *Client) resolvePending(id json.RawMessage, result rpcResult) {
-	key := string(id)
-
+func (c *Client) resolvePending(requestID int64, result rpcResult) {
 	c.pendingMu.Lock()
-	resultCh, ok := c.pending[key]
+	resultCh, ok := c.pending[requestID]
 	if ok {
-		delete(c.pending, key)
+		delete(c.pending, requestID)
 	}
 	c.pendingMu.Unlock()
 
@@ -776,7 +774,7 @@ func (c *Client) resolvePending(id json.RawMessage, result rpcResult) {
 func (c *Client) failPending(err error) {
 	c.pendingMu.Lock()
 	pending := c.pending
-	c.pending = make(map[string]chan rpcResult)
+	c.pending = make(map[int64]chan rpcResult)
 	c.pendingMu.Unlock()
 
 	for _, resultCh := range pending {
@@ -865,9 +863,4 @@ func mustValue[T any](value *T) any {
 		return map[string]any{}
 	}
 	return value
-}
-
-func strconvKey(requestID string) string {
-	raw, _ := json.Marshal(requestID)
-	return string(raw)
 }
