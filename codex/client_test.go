@@ -313,8 +313,8 @@ func TestTransportClosedIncludesStderrTail(t *testing.T) {
 		t.Fatal("Open() error = nil, want TransportClosedError")
 	}
 
-	var transportErr *TransportClosedError
-	if !errors.As(err, &transportErr) {
+	transportErr, ok := errors.AsType[*TransportClosedError](err)
+	if !ok {
 		t.Fatalf("Open() error = %T, want *TransportClosedError", err)
 	}
 	if !strings.Contains(transportErr.StderrTail, "helper stderr boom") {

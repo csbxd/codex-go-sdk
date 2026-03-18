@@ -697,8 +697,8 @@ func (c *Client) handleServerRequest(id json.RawMessage, method string, params j
 
 	result, err := c.config.RequestHandler(c.clientCtx, request)
 	if err != nil {
-		var rpcErr *JSONRPCError
-		if !asJSONRPCError(err, &rpcErr) {
+		rpcErr, ok := errors.AsType[*JSONRPCError](err)
+		if !ok {
 			rpcErr = &JSONRPCError{
 				Code:    -32000,
 				Message: err.Error(),
@@ -890,12 +890,4 @@ func mustValue[T any](value *T) any {
 func strconvKey(requestID string) string {
 	raw, _ := json.Marshal(requestID)
 	return string(raw)
-}
-
-func asJSONRPCError(err error, target **JSONRPCError) bool {
-	return errorAs(err, target)
-}
-
-func errorAs[T error](err error, target *T) bool {
-	return errors.As(err, target)
 }

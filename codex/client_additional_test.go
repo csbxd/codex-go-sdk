@@ -174,8 +174,8 @@ func TestRequestDecodeError(t *testing.T) {
 		t.Fatal("Request() error = nil, want DecodeError")
 	}
 
-	var decodeErr *DecodeError
-	if !errors.As(err, &decodeErr) {
+	decodeErr, ok := errors.AsType[*DecodeError](err)
+	if !ok {
 		t.Fatalf("Request() error = %T, want *DecodeError", err)
 	}
 	if decodeErr.Method != "test/broken" {
@@ -319,8 +319,8 @@ func TestNextNotificationClosedTransport(t *testing.T) {
 		t.Fatal("NextNotification() error = nil, want TransportClosedError")
 	}
 
-	var transportErr *TransportClosedError
-	if !errors.As(err, &transportErr) {
+	transportErr, ok := errors.AsType[*TransportClosedError](err)
+	if !ok {
 		t.Fatalf("NextNotification() error = %T, want *TransportClosedError", err)
 	}
 	if transportErr.StderrTail != "stderr line" {
@@ -548,12 +548,12 @@ func TestErrorHelpers(t *testing.T) {
 	}
 
 	wrapped := &DecodeError{Cause: rpcErr}
-	var target *JSONRPCError
-	if !asJSONRPCError(wrapped, &target) {
-		t.Fatal("asJSONRPCError() = false, want true")
+	target, ok := errors.AsType[*JSONRPCError](wrapped)
+	if !ok {
+		t.Fatal("errors.AsType[*JSONRPCError]() = false, want true")
 	}
 	if target != rpcErr {
-		t.Fatalf("asJSONRPCError() target = %#v, want %#v", target, rpcErr)
+		t.Fatalf("errors.AsType[*JSONRPCError]() target = %#v, want %#v", target, rpcErr)
 	}
 }
 

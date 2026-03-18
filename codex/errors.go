@@ -22,8 +22,8 @@ func (e *JSONRPCError) Error() string {
 
 // IsOverload reports whether err is the app-server retryable overload error.
 func IsOverload(err error) bool {
-	var rpcErr *JSONRPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == -32001
+	rpcErr, ok := errors.AsType[*JSONRPCError](err)
+	return ok && rpcErr.Code == -32001
 }
 
 // TransportClosedError reports that the app-server transport stopped before the
