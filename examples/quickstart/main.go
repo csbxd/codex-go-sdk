@@ -12,7 +12,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	client := codexappserver.NewClient(codexappserver.Config{})
+	client := codex.NewClient(codex.Config{})
 	defer func() {
 		_ = client.Close()
 	}()

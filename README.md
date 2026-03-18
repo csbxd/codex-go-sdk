@@ -13,6 +13,8 @@ This repository keeps the SDK implementation under [`codex/`](./codex). It launc
 
 ## Install
 
+Requires Go 1.26.1 or newer.
+
 ```bash
 go get github.com/csbxd/codex-go-sdk/codex
 ```
@@ -34,7 +36,7 @@ import (
 func main() {
   ctx := context.Background()
 
-  client := codexappserver.NewClient(codexappserver.Config{})
+  client := codex.NewClient(codex.Config{})
   defer client.Close()
 
   if _, err := client.Open(ctx); err != nil {
@@ -42,7 +44,7 @@ func main() {
   }
 
   started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
-    Model: codexappserver.Ptr("gpt-5"),
+    Model: new("gpt-5"),
   })
   if err != nil {
     log.Fatal(err)
@@ -53,7 +55,7 @@ func main() {
     started.Thread.ID,
     "Say hello in one sentence.",
     &protocol.TurnStartParams{
-      Effort: codexappserver.Ptr(protocol.ReasoningEffortMedium),
+      Effort: new(protocol.ReasoningEffortMedium),
     },
   )
   if err != nil {
@@ -65,7 +67,7 @@ func main() {
     log.Fatal(err)
   }
 
-  fmt.Println(completed.Turn.Status)
+  fmt.Printf("thread=%s turn=%s status=%s\n", started.Thread.ID, completed.Turn.ID, completed.Turn.Status)
 }
 ```
 

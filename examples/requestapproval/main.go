@@ -13,8 +13,8 @@ func main() {
 	ctx := context.Background()
 	approvalPolicy := protocol.AskForApproval([]byte(`"untrusted"`))
 
-	client := codexappserver.NewClient(codexappserver.Config{
-		RequestHandler: func(_ context.Context, request codexappserver.ServerRequest) (any, error) {
+	client := codex.NewClient(codex.Config{
+		RequestHandler: func(_ context.Context, request codex.ServerRequest) (any, error) {
 			fmt.Printf("server request: %s (%T)\n", request.Method, request.Payload)
 			return map[string]any{"decision": "accept"}, nil
 		},
