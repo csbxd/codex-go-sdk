@@ -1,3 +1,3 @@
 module github.com/csbxd/codex-go-sdk
 
-go 1.25.0
+go 1.26.1

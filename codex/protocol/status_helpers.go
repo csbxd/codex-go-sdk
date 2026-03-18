@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // ThreadStatusKind is the decoded discriminator for the ThreadStatus union.
@@ -75,12 +76,7 @@ func (s ThreadStatusState) IsActive() bool {
 
 // HasActiveFlag reports whether the active thread state contains the flag.
 func (s ThreadStatusState) HasActiveFlag(flag ThreadActiveFlag) bool {
-	for _, candidate := range s.ActiveFlags {
-		if candidate == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.ActiveFlags, flag)
 }
 
 // StatusState decodes Thread.Status.

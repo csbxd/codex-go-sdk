@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"strings"
@@ -163,11 +164,6 @@ func NewClient(config Config) *Client {
 	}
 }
 
-// Ptr returns a pointer to v.
-func Ptr[T any](v T) *T {
-	return &v
-}
-
 // MarshalUserInput converts an input item into the generated protocol type.
 func MarshalUserInput(value any) (protocol.UserInput, error) {
 	raw, err := json.Marshal(value)
@@ -310,11 +306,11 @@ func (c *Client) Initialize(ctx context.Context) (protocol.InitializeResponse, e
 	params := protocol.InitializeParams{
 		ClientInfo: protocol.ClientInfo{
 			Name:    c.config.ClientName,
-			Title:   Ptr(c.config.ClientTitle),
+			Title:   new(c.config.ClientTitle),
 			Version: c.config.ClientVersion,
 		},
 		Capabilities: &protocol.InitializeCapabilities{
-			ExperimentalApi: Ptr(c.config.ExperimentalAPI),
+			ExperimentalApi: new(c.config.ExperimentalAPI),
 		},
 	}
 
@@ -612,9 +608,7 @@ func (c *Client) processEnv() []string {
 			envMap[key] = value
 		}
 	}
-	for key, value := range c.config.Env {
-		envMap[key] = value
-	}
+	maps.Copy(envMap, c.config.Env)
 
 	env := make([]string, 0, len(envMap))
 	for key, value := range envMap {

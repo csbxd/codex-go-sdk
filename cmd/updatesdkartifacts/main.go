@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"go/token"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -603,12 +604,8 @@ func (g *generator) mergeDefinitions() (map[string]*schemaNode, error) {
 	}
 
 	merged := make(map[string]*schemaNode, len(rootBundle.Definitions)+len(v2Bundle.Definitions))
-	for name, definition := range rootBundle.Definitions {
-		merged[name] = definition
-	}
-	for name, definition := range v2Bundle.Definitions {
-		merged[name] = definition
-	}
+	maps.Copy(merged, rootBundle.Definitions)
+	maps.Copy(merged, v2Bundle.Definitions)
 	return merged, nil
 }
 
@@ -752,24 +749,20 @@ func referencedDefinitionNames(schema *schemaNode) map[string]struct{} {
 			return
 		}
 
-		if strings.HasPrefix(node.Ref, "#/definitions/") {
-			refs[strings.TrimPrefix(node.Ref, "#/definitions/")] = struct{}{}
+		if after, ok := strings.CutPrefix(node.Ref, "#/definitions/"); ok {
+			refs[after] = struct{}{}
 		}
 
 		for _, branch := range node.OneOf {
-			branch := branch
 			visitValue(&branch)
 		}
 		for _, branch := range node.AnyOf {
-			branch := branch
 			visitValue(&branch)
 		}
 		for _, branch := range node.AllOf {
-			branch := branch
 			visitValue(&branch)
 		}
 		for _, property := range node.Properties {
-			property := property
 			visitValue(&property)
 		}
 		visitValue(node.AdditionalProperties)
@@ -1128,8 +1121,8 @@ func (r *goRenderer) typeExpr(schema *schemaNode) ast.Expr {
 		return anyIdent()
 	}
 
-	if strings.HasPrefix(normalized.Ref, "#/definitions/") {
-		return ident(goTypeName(strings.TrimPrefix(normalized.Ref, "#/definitions/")))
+	if after, ok := strings.CutPrefix(normalized.Ref, "#/definitions/"); ok {
+		return ident(goTypeName(after))
 	}
 	if isStringEnum(normalized) {
 		return ident("string")

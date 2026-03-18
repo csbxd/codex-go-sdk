@@ -22,7 +22,7 @@ func main() {
 	}
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
-		Model: codexappserver.Ptr("gpt-5"),
+		Model: new("gpt-5"),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -33,7 +33,7 @@ func main() {
 		started.Thread.ID,
 		"Say hello in one sentence.",
 		&protocol.TurnStartParams{
-			Effort: codexappserver.Ptr(protocol.ReasoningEffortMedium),
+			Effort: new(protocol.ReasoningEffortMedium),
 		},
 	)
 	if err != nil {

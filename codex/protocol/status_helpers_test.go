@@ -48,7 +48,7 @@ func TestParseThreadStatus(t *testing.T) {
 					ThreadActiveFlagWaitingOnUserInput,
 				},
 			},
-			hasFlag:  ptrThreadActiveFlag(ThreadActiveFlagWaitingOnApproval),
+			hasFlag:  new(ThreadActiveFlagWaitingOnApproval),
 			isLoaded: true,
 			isActive: true,
 		},
@@ -70,7 +70,6 @@ func TestParseThreadStatus(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -292,8 +291,4 @@ func TestTurnPlanStepStatusStateMachine(t *testing.T) {
 	if TurnPlanStepStatusCompleted.CanTransitionTo(TurnPlanStepStatusInProgress) {
 		t.Fatal("TurnPlanStepStatusCompleted can transition back to inProgress")
 	}
-}
-
-func ptrThreadActiveFlag(v ThreadActiveFlag) *ThreadActiveFlag {
-	return &v
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,7 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 	}
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
-		Model: Ptr("gpt-5"),
+		Model: new("gpt-5"),
 	})
 	if err != nil {
 		t.Fatalf("ThreadStart() error = %v", err)
@@ -52,8 +53,8 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 	}
 
 	listed, err := client.ThreadList(ctx, &protocol.ThreadListParams{
-		SearchTerm: Ptr("needle"),
-		Limit:      Ptr[uint32](5),
+		SearchTerm: new("needle"),
+		Limit:      new(uint32(5)),
 	})
 	if err != nil {
 		t.Fatalf("ThreadList() error = %v", err)
@@ -64,7 +65,7 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 
 	read, err := client.ThreadRead(ctx, &protocol.ThreadReadParams{
 		ThreadId:     "thread-1",
-		IncludeTurns: Ptr(true),
+		IncludeTurns: new(true),
 	})
 	if err != nil {
 		t.Fatalf("ThreadRead() error = %v", err)
@@ -154,7 +155,7 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 	}
 
 	models, err := client.ModelList(ctx, &protocol.ModelListParams{
-		IncludeHidden: Ptr(true),
+		IncludeHidden: new(true),
 	})
 	if err != nil {
 		t.Fatalf("ModelList() error = %v", err)
@@ -557,9 +558,7 @@ func helperEnv(extra map[string]string) map[string]string {
 	env := map[string]string{
 		"GO_WANT_HELPER_PROCESS": "1",
 	}
-	for key, value := range extra {
-		env[key] = value
-	}
+	maps.Copy(env, extra)
 	return env
 }
 

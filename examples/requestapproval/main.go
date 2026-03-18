@@ -40,7 +40,7 @@ func main() {
 		"Create a file named approval_probe.txt in the current directory with the exact text hello.",
 		&protocol.TurnStartParams{
 			ApprovalPolicy: &approvalPolicy,
-			Effort:         codexappserver.Ptr(protocol.ReasoningEffortMedium),
+			Effort:         new(protocol.ReasoningEffortMedium),
 		},
 	)
 	if err != nil {

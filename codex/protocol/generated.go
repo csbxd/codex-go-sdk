@@ -357,8 +357,9 @@ type HookCompletedNotification struct {
 type HookEventName string
 
 const (
-	HookEventNameSessionStart HookEventName = "sessionStart"
-	HookEventNameStop         HookEventName = "stop"
+	HookEventNameSessionStart     HookEventName = "sessionStart"
+	HookEventNameUserPromptSubmit HookEventName = "userPromptSubmit"
+	HookEventNameStop             HookEventName = "stop"
 )
 
 type HookExecutionMode string
@@ -649,6 +650,18 @@ const (
 	McpToolCallStatusFailed     McpToolCallStatus = "failed"
 )
 
+type MemoryCitation struct {
+	Entries   []MemoryCitationEntry `json:"entries"`
+	ThreadIds []string              `json:"threadIds"`
+}
+
+type MemoryCitationEntry struct {
+	LineEnd   uint32 `json:"lineEnd"`
+	LineStart uint32 `json:"lineStart"`
+	Note      string `json:"note"`
+	Path      string `json:"path"`
+}
+
 type MessagePhase string
 
 const (
@@ -805,6 +818,13 @@ type RateLimitWindow struct {
 }
 
 type ReadOnlyAccess = json.RawMessage
+
+type RealtimeConversationVersion string
+
+const (
+	RealtimeConversationVersionV1 RealtimeConversationVersion = "v1"
+	RealtimeConversationVersionV2 RealtimeConversationVersion = "v2"
+)
 
 type ReasoningEffort string
 
@@ -1041,8 +1061,9 @@ type ThreadRealtimeOutputAudioDeltaNotification struct {
 }
 
 type ThreadRealtimeStartedNotification struct {
-	SessionId *string `json:"sessionId,omitempty"`
-	ThreadId  string  `json:"threadId"`
+	SessionId *string                     `json:"sessionId,omitempty"`
+	ThreadId  string                      `json:"threadId"`
+	Version   RealtimeConversationVersion `json:"version"`
 }
 
 type ThreadResumeParams struct {

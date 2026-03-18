@@ -55,10 +55,10 @@ func TestIntegrationAppServerCoreFlow(t *testing.T) {
 	effort := chooseIntegrationEffort(t, model)
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
-		CWD:       Ptr(workDir),
-		Ephemeral: Ptr(true),
-		Model:     Ptr(model.ID),
-		Sandbox:   Ptr(protocol.SandboxModeWorkspaceWrite),
+		CWD:       new(workDir),
+		Ephemeral: new(true),
+		Model:     new(model.ID),
+		Sandbox:   new(protocol.SandboxModeWorkspaceWrite),
 	})
 	if err != nil {
 		t.Fatalf("ThreadStart() error = %v", err)
@@ -69,8 +69,8 @@ func TestIntegrationAppServerCoreFlow(t *testing.T) {
 		started.Thread.ID,
 		"Reply with exactly OK.",
 		&protocol.TurnStartParams{
-			CWD:    Ptr(workDir),
-			Effort: Ptr(effort),
+			CWD:    new(workDir),
+			Effort: new(effort),
 		},
 	)
 	if err != nil {
@@ -138,10 +138,10 @@ func TestIntegrationFileChangeFlow(t *testing.T) {
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
 		ApprovalPolicy: &approvalPolicy,
-		CWD:            Ptr(workDir),
-		Ephemeral:      Ptr(true),
-		Model:          Ptr(model.ID),
-		Sandbox:        Ptr(protocol.SandboxModeWorkspaceWrite),
+		CWD:            new(workDir),
+		Ephemeral:      new(true),
+		Model:          new(model.ID),
+		Sandbox:        new(protocol.SandboxModeWorkspaceWrite),
 	})
 	if err != nil {
 		t.Fatalf("ThreadStart() error = %v", err)
@@ -153,8 +153,8 @@ func TestIntegrationFileChangeFlow(t *testing.T) {
 		"Use the apply_patch tool, not shell commands, to apply this exact patch:\n*** Begin Patch\n*** Add File: approval_probe.txt\n+hello\n*** End Patch",
 		&protocol.TurnStartParams{
 			ApprovalPolicy: &approvalPolicy,
-			CWD:            Ptr(workDir),
-			Effort:         Ptr(effort),
+			CWD:            new(workDir),
+			Effort:         new(effort),
 		},
 	)
 	if err != nil {
@@ -247,7 +247,7 @@ func selectIntegrationModel(
 	t.Helper()
 
 	models, err := client.ModelList(ctx, &protocol.ModelListParams{
-		IncludeHidden: Ptr(true),
+		IncludeHidden: new(true),
 	})
 	if err != nil {
 		t.Fatalf("ModelList() error = %v", err)

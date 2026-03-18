@@ -32,7 +32,7 @@ func main() {
 		started.Thread.ID,
 		"Describe what you are doing as you work.",
 		&protocol.TurnStartParams{
-			Effort: codexappserver.Ptr(protocol.ReasoningEffortMedium),
+			Effort: new(protocol.ReasoningEffortMedium),
 		},
 	)
 	if err != nil {
