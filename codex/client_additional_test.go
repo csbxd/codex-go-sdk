@@ -328,14 +328,14 @@ func TestNextNotificationClosedTransport(t *testing.T) {
 	}
 }
 
-func TestInitializeCachesResponse(t *testing.T) {
+func TestInitializeRepeatedCallReturnsServerError(t *testing.T) {
 	t.Parallel()
 
 	logPath := filepath.Join(t.TempDir(), "initialize.jsonl")
 	client := NewClient(Config{
 		LaunchArgsOverride: helperArgs(),
 		Env: helperEnv(map[string]string{
-			"CODEX_GO_TEST_SCENARIO": "core",
+			"CODEX_GO_TEST_SCENARIO": "initialize-duplicate",
 			"CODEX_GO_TEST_LOG":      logPath,
 		}),
 	})
@@ -346,23 +346,25 @@ func TestInitializeCachesResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	first, err := client.Open(ctx)
-	if err != nil {
+	if _, err := client.Open(ctx); err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	second, err := client.Initialize(ctx)
-	if err != nil {
-		t.Fatalf("Initialize() second call error = %v", err)
-	}
-	if first != second {
-		t.Fatalf("Initialize() second call = %#v, want cached %#v", second, first)
+	_, err := client.Initialize(ctx)
+	if err == nil {
+		t.Fatal("Initialize() second call error = nil, want JSONRPCError")
 	}
 
-	waitForLogEntry(t, logPath, func(entry map[string]any) bool {
-		method, _ := entry["method"].(string)
-		return method == "initialized"
-	})
+	rpcErr, ok := errors.AsType[*JSONRPCError](err)
+	if !ok {
+		t.Fatalf("Initialize() second call error = %T, want *JSONRPCError", err)
+	}
+	if rpcErr.Code != -32600 {
+		t.Fatalf("Initialize() second call code = %d, want %d", rpcErr.Code, -32600)
+	}
+	if rpcErr.Message != "Already initialized" {
+		t.Fatalf("Initialize() second call message = %q, want %q", rpcErr.Message, "Already initialized")
+	}
 
 	methods := logMethods(t, readLogLines(t, logPath))
 	initializeCount := 0
@@ -375,8 +377,46 @@ func TestInitializeCachesResponse(t *testing.T) {
 			initializedCount++
 		}
 	}
-	if initializeCount != 1 || initializedCount != 1 {
-		t.Fatalf("initialize counts = (%d, %d), want (1, 1)", initializeCount, initializedCount)
+	if initializeCount != 2 || initializedCount != 1 {
+		t.Fatalf("initialize counts = (%d, %d), want (2, 1)", initializeCount, initializedCount)
+	}
+}
+
+func TestOpenRepeatedCallLeavesTransportOpen(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(Config{
+		LaunchArgsOverride: helperArgs(),
+		Env: helperEnv(map[string]string{
+			"CODEX_GO_TEST_SCENARIO": "initialize-duplicate",
+		}),
+	})
+	defer func() {
+		_ = client.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.Open(ctx); err != nil {
+		t.Fatalf("Open() first call error = %v", err)
+	}
+
+	_, err := client.Open(ctx)
+	if err == nil {
+		t.Fatal("Open() second call error = nil, want JSONRPCError")
+	}
+
+	rpcErr, ok := errors.AsType[*JSONRPCError](err)
+	if !ok {
+		t.Fatalf("Open() second call error = %T, want *JSONRPCError", err)
+	}
+	if rpcErr.Message != "Already initialized" {
+		t.Fatalf("Open() second call message = %q, want %q", rpcErr.Message, "Already initialized")
+	}
+
+	if _, err := client.ThreadStart(ctx, nil); err != nil {
+		t.Fatalf("ThreadStart() after repeated Open() error = %v, want live transport", err)
 	}
 }
 

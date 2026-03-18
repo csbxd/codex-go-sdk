@@ -358,6 +358,7 @@ func TestHelperProcess(t *testing.T) {
 
 	scenario := os.Getenv("CODEX_GO_TEST_SCENARIO")
 	logPath := os.Getenv("CODEX_GO_TEST_LOG")
+	initializeCount := 0
 
 	reader := bufio.NewReader(os.Stdin)
 	writer := json.NewEncoder(os.Stdout)
@@ -387,11 +388,22 @@ func TestHelperProcess(t *testing.T) {
 
 		switch method {
 		case "initialize":
+			initializeCount++
 			if scenario == "transport-close" {
 				_, _ = os.Stderr.WriteString("helper stderr boom\n")
 				_ = os.Stdout.Sync()
 				_ = os.Stderr.Sync()
 				os.Exit(0)
+			}
+			if scenario == "initialize-duplicate" && initializeCount > 1 {
+				mustEncode(writer, map[string]any{
+					"error": map[string]any{
+						"code":    -32600,
+						"message": "Already initialized",
+					},
+					"id": id,
+				})
+				continue
 			}
 			mustEncode(writer, map[string]any{
 				"id": id,

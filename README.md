@@ -75,6 +75,7 @@ func main() {
 
 - `NewClient(Config)` constructs the client.
 - `(*Client).Open(ctx)` starts the child process, sends `initialize`, and emits `initialized`.
+- `(*Client).Initialize(ctx)` forwards each initialize attempt to `codex app-server`; repeated calls return the server's `Already initialized` JSON-RPC error.
 - `(*Client).Request(ctx, method, params, out)` is the generic request path for methods that do not yet have a dedicated wrapper.
 - Typed wrappers are available for:
   `thread/start`, `thread/resume`, `thread/list`, `thread/read`, `thread/fork`, `thread/archive`, `thread/unarchive`, `thread/name/set`, `thread/compact/start`,

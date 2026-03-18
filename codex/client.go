@@ -95,10 +95,6 @@ type Client struct {
 
 	nextID atomic.Uint64
 
-	initializedMu sync.RWMutex
-	initialized   bool
-	initResponse  protocol.InitializeResponse
-
 	closeOnce sync.Once
 }
 
@@ -249,7 +245,10 @@ func (c *Client) Open(ctx context.Context) (protocol.InitializeResponse, error) 
 
 	resp, err := c.Initialize(ctx)
 	if err != nil {
-		_ = c.Close()
+		rpcErr, ok := errors.AsType[*JSONRPCError](err)
+		if !ok || rpcErr.Message != "Already initialized" {
+			_ = c.Close()
+		}
 		return protocol.InitializeResponse{}, err
 	}
 	return resp, nil
@@ -292,17 +291,9 @@ func (c *Client) Close() error {
 	return closeErr
 }
 
-// Initialize performs the required initialize/initialized handshake once per
-// connection.
+// Initialize performs the required initialize request followed by the
+// initialized notification.
 func (c *Client) Initialize(ctx context.Context) (protocol.InitializeResponse, error) {
-	c.initializedMu.RLock()
-	if c.initialized {
-		resp := c.initResponse
-		c.initializedMu.RUnlock()
-		return resp, nil
-	}
-	c.initializedMu.RUnlock()
-
 	params := protocol.InitializeParams{
 		ClientInfo: protocol.ClientInfo{
 			Name:    c.config.ClientName,
@@ -321,11 +312,6 @@ func (c *Client) Initialize(ctx context.Context) (protocol.InitializeResponse, e
 	if err := c.Notify("initialized", map[string]any{}); err != nil {
 		return protocol.InitializeResponse{}, err
 	}
-
-	c.initializedMu.Lock()
-	c.initialized = true
-	c.initResponse = resp
-	c.initializedMu.Unlock()
 
 	return resp, nil
 }
