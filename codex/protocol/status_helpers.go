@@ -1,57 +1,46 @@
 package protocol
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 )
 
-// ThreadStatusKind is the decoded discriminator for the ThreadStatus union.
-type ThreadStatusKind string
+// ThreadStatusKind is a backward-compatible alias for ThreadStatusType.
+type ThreadStatusKind = ThreadStatusType
 
 const (
-	ThreadStatusKindNotLoaded   ThreadStatusKind = "notLoaded"
-	ThreadStatusKindIdle        ThreadStatusKind = "idle"
-	ThreadStatusKindSystemError ThreadStatusKind = "systemError"
-	ThreadStatusKindActive      ThreadStatusKind = "active"
+	ThreadStatusKindNotLoaded   ThreadStatusKind = ThreadStatusTypeNotLoaded
+	ThreadStatusKindIdle        ThreadStatusKind = ThreadStatusTypeIdle
+	ThreadStatusKindSystemError ThreadStatusKind = ThreadStatusTypeSystemError
+	ThreadStatusKindActive      ThreadStatusKind = ThreadStatusTypeActive
 )
 
-// ThreadStatusState is a decoded view of the generated ThreadStatus raw union.
+// ThreadStatusState is a validated view of the generated ThreadStatus payload.
 type ThreadStatusState struct {
 	Kind        ThreadStatusKind
 	ActiveFlags []ThreadActiveFlag
 }
 
-type rawThreadStatus struct {
-	Type        ThreadStatusKind   `json:"type"`
-	ActiveFlags []ThreadActiveFlag `json:"activeFlags"`
-}
-
-// ParseThreadStatus decodes the generated ThreadStatus raw JSON into a stable
-// helper type.
-func ParseThreadStatus(raw ThreadStatus) (ThreadStatusState, error) {
-	if len(raw) == 0 {
-		return ThreadStatusState{}, fmt.Errorf("thread status is empty")
-	}
-
-	var decoded rawThreadStatus
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return ThreadStatusState{}, fmt.Errorf("decode thread status: %w", err)
-	}
-
-	switch decoded.Type {
-	case ThreadStatusKindNotLoaded, ThreadStatusKindIdle, ThreadStatusKindSystemError:
-		if len(decoded.ActiveFlags) > 0 {
-			return ThreadStatusState{}, fmt.Errorf("thread status %q does not allow activeFlags", decoded.Type)
+// ParseThreadStatus validates ThreadStatus and returns a stable helper view.
+func ParseThreadStatus(status ThreadStatus) (ThreadStatusState, error) {
+	if !status.Type.IsValid() {
+		if status.Type == "" {
+			return ThreadStatusState{}, fmt.Errorf("thread status type is empty")
 		}
-	case ThreadStatusKindActive:
-	default:
-		return ThreadStatusState{}, fmt.Errorf("unknown thread status type %q", decoded.Type)
+		return ThreadStatusState{}, fmt.Errorf("unknown thread status type %q", status.Type)
 	}
 
+	if status.Type != ThreadStatusTypeActive && len(status.ActiveFlags) > 0 {
+		return ThreadStatusState{}, fmt.Errorf("thread status %q does not allow activeFlags", status.Type)
+	}
+	for _, flag := range status.ActiveFlags {
+		if !flag.IsValid() {
+			return ThreadStatusState{}, fmt.Errorf("unknown thread active flag %q", flag)
+		}
+	}
 	return ThreadStatusState{
-		Kind:        decoded.Type,
-		ActiveFlags: append([]ThreadActiveFlag(nil), decoded.ActiveFlags...),
+		Kind:        status.Type,
+		ActiveFlags: append([]ThreadActiveFlag(nil), status.ActiveFlags...),
 	}, nil
 }
 
@@ -81,7 +70,7 @@ func (s ThreadStatusState) HasActiveFlag(flag ThreadActiveFlag) bool {
 
 // StatusState decodes Thread.Status.
 func (t Thread) StatusState() (ThreadStatusState, error) {
-	return ParseThreadStatus(ThreadStatus(t.Status))
+	return ParseThreadStatus(t.Status)
 }
 
 // StatusState decodes ThreadStatusChangedNotification.Status.

@@ -1,9 +1,16 @@
 package protocol
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseThreadStatus(t *testing.T) {
 	t.Parallel()
+
+	flagPtr := func(flag ThreadActiveFlag) *ThreadActiveFlag {
+		return &flag
+	}
 
 	tests := []struct {
 		name     string
@@ -16,31 +23,34 @@ func TestParseThreadStatus(t *testing.T) {
 	}{
 		{
 			name:     "not loaded",
-			raw:      ThreadStatus(`{"type":"notLoaded"}`),
+			raw:      ThreadStatus{Type: ThreadStatusTypeNotLoaded},
 			want:     ThreadStatusState{Kind: ThreadStatusKindNotLoaded},
 			isLoaded: false,
 			isActive: false,
 		},
 		{
 			name:     "idle",
-			raw:      ThreadStatus(`{"type":"idle"}`),
+			raw:      ThreadStatus{Type: ThreadStatusTypeIdle},
 			want:     ThreadStatusState{Kind: ThreadStatusKindIdle},
 			isLoaded: true,
 			isActive: false,
 		},
 		{
 			name:     "system error",
-			raw:      ThreadStatus(`{"type":"systemError"}`),
+			raw:      ThreadStatus{Type: ThreadStatusTypeSystemError},
 			want:     ThreadStatusState{Kind: ThreadStatusKindSystemError},
 			isLoaded: true,
 			isActive: false,
 		},
 		{
 			name: "active",
-			raw: ThreadStatus(`{
-				"type":"active",
-				"activeFlags":["waitingOnApproval","waitingOnUserInput"]
-			}`),
+			raw: ThreadStatus{
+				Type: ThreadStatusTypeActive,
+				ActiveFlags: []ThreadActiveFlag{
+					ThreadActiveFlagWaitingOnApproval,
+					ThreadActiveFlagWaitingOnUserInput,
+				},
+			},
 			want: ThreadStatusState{
 				Kind: ThreadStatusKindActive,
 				ActiveFlags: []ThreadActiveFlag{
@@ -48,23 +58,28 @@ func TestParseThreadStatus(t *testing.T) {
 					ThreadActiveFlagWaitingOnUserInput,
 				},
 			},
-			hasFlag:  new(ThreadActiveFlagWaitingOnApproval),
+			hasFlag:  flagPtr(ThreadActiveFlagWaitingOnApproval),
 			isLoaded: true,
 			isActive: true,
 		},
 		{
 			name:    "empty",
-			raw:     nil,
+			raw:     ThreadStatus{},
 			wantErr: true,
 		},
 		{
 			name:    "unknown kind",
-			raw:     ThreadStatus(`{"type":"mystery"}`),
+			raw:     ThreadStatus{Type: ThreadStatusType("mystery")},
 			wantErr: true,
 		},
 		{
 			name:    "active flags on idle are rejected",
-			raw:     ThreadStatus(`{"type":"idle","activeFlags":["waitingOnApproval"]}`),
+			raw:     ThreadStatus{Type: ThreadStatusTypeIdle, ActiveFlags: []ThreadActiveFlag{ThreadActiveFlagWaitingOnApproval}},
+			wantErr: true,
+		},
+		{
+			name:    "unknown active flag",
+			raw:     ThreadStatus{Type: ThreadStatusTypeActive, ActiveFlags: []ThreadActiveFlag{ThreadActiveFlag("mystery")}},
 			wantErr: true,
 		},
 	}
@@ -83,17 +98,8 @@ func TestParseThreadStatus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseThreadStatus() error = %v", err)
 			}
-
-			if got.Kind != test.want.Kind {
-				t.Fatalf("ParseThreadStatus() kind = %q, want %q", got.Kind, test.want.Kind)
-			}
-			if len(got.ActiveFlags) != len(test.want.ActiveFlags) {
-				t.Fatalf("ParseThreadStatus() activeFlags = %#v, want %#v", got.ActiveFlags, test.want.ActiveFlags)
-			}
-			for index := range got.ActiveFlags {
-				if got.ActiveFlags[index] != test.want.ActiveFlags[index] {
-					t.Fatalf("ParseThreadStatus() activeFlags = %#v, want %#v", got.ActiveFlags, test.want.ActiveFlags)
-				}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("ParseThreadStatus() = %#v, want %#v", got, test.want)
 			}
 			if got.IsLoaded() != test.isLoaded {
 				t.Fatalf("ParseThreadStatus() IsLoaded() = %v, want %v", got.IsLoaded(), test.isLoaded)
@@ -112,7 +118,10 @@ func TestThreadStatusStateHelpers(t *testing.T) {
 	t.Parallel()
 
 	thread := Thread{
-		Status: ThreadStatus(`{"type":"active","activeFlags":["waitingOnApproval"]}`),
+		Status: ThreadStatus{
+			Type:        ThreadStatusTypeActive,
+			ActiveFlags: []ThreadActiveFlag{ThreadActiveFlagWaitingOnApproval},
+		},
 	}
 	state, err := thread.StatusState()
 	if err != nil {
@@ -123,7 +132,7 @@ func TestThreadStatusStateHelpers(t *testing.T) {
 	}
 
 	notification := ThreadStatusChangedNotification{
-		Status: ThreadStatus(`{"type":"idle"}`),
+		Status: ThreadStatus{Type: ThreadStatusTypeIdle},
 	}
 	state, err = notification.StatusState()
 	if err != nil {
@@ -220,8 +229,8 @@ func TestToolCallStatusStateMachine(t *testing.T) {
 	if !CollabAgentToolCallStatusInProgress.CanTransitionTo(CollabAgentToolCallStatusCompleted) {
 		t.Fatal("CollabAgentToolCallStatusInProgress cannot transition to completed")
 	}
-	if CollabAgentToolCallStatusFailed.CanTransitionTo(CollabAgentToolCallStatusInProgress) {
-		t.Fatal("CollabAgentToolCallStatusFailed can transition back to inProgress")
+	if CollabAgentToolCallStatusCompleted.CanTransitionTo(CollabAgentToolCallStatusInProgress) {
+		t.Fatal("CollabAgentToolCallStatusCompleted can transition back to inProgress")
 	}
 }
 
@@ -243,6 +252,9 @@ func TestHookRunStatusStateMachine(t *testing.T) {
 		if !next.IsTerminal() {
 			t.Fatalf("%q IsTerminal() = false, want true", next)
 		}
+		if next.CanTransitionTo(HookRunStatusRunning) {
+			t.Fatalf("%q.CanTransitionTo(running) = true, want false", next)
+		}
 	}
 }
 
@@ -252,8 +264,16 @@ func TestCollabAgentStatusStateMachine(t *testing.T) {
 	if CollabAgentStatusPendingInit.IsTerminal() {
 		t.Fatal("CollabAgentStatusPendingInit.IsTerminal() = true, want false")
 	}
-	if !CollabAgentStatusPendingInit.CanTransitionTo(CollabAgentStatusRunning) {
-		t.Fatal("CollabAgentStatusPendingInit cannot transition to running")
+	for _, next := range []CollabAgentStatus{
+		CollabAgentStatusRunning,
+		CollabAgentStatusCompleted,
+		CollabAgentStatusErrored,
+		CollabAgentStatusShutdown,
+		CollabAgentStatusNotFound,
+	} {
+		if !CollabAgentStatusPendingInit.CanTransitionTo(next) {
+			t.Fatalf("CollabAgentStatusPendingInit.CanTransitionTo(%q) = false, want true", next)
+		}
 	}
 	for _, next := range []CollabAgentStatus{
 		CollabAgentStatusCompleted,
@@ -267,17 +287,14 @@ func TestCollabAgentStatusStateMachine(t *testing.T) {
 		if !next.IsTerminal() {
 			t.Fatalf("%q IsTerminal() = false, want true", next)
 		}
-		if next.CanTransitionTo(CollabAgentStatusRunning) {
-			t.Fatalf("%q.CanTransitionTo(running) = true, want false", next)
-		}
 	}
 }
 
 func TestTurnPlanStepStatusStateMachine(t *testing.T) {
 	t.Parallel()
 
-	if TurnPlanStepStatusPending.IsTerminal() {
-		t.Fatal("TurnPlanStepStatusPending.IsTerminal() = true, want false")
+	if TurnPlanStepStatusCompleted.CanTransitionTo(TurnPlanStepStatusInProgress) {
+		t.Fatal("TurnPlanStepStatusCompleted can transition back to inProgress")
 	}
 	if !TurnPlanStepStatusPending.CanTransitionTo(TurnPlanStepStatusInProgress) {
 		t.Fatal("TurnPlanStepStatusPending cannot transition to inProgress")
@@ -287,8 +304,5 @@ func TestTurnPlanStepStatusStateMachine(t *testing.T) {
 	}
 	if !TurnPlanStepStatusInProgress.CanTransitionTo(TurnPlanStepStatusCompleted) {
 		t.Fatal("TurnPlanStepStatusInProgress cannot transition to completed")
-	}
-	if TurnPlanStepStatusCompleted.CanTransitionTo(TurnPlanStepStatusInProgress) {
-		t.Fatal("TurnPlanStepStatusCompleted can transition back to inProgress")
 	}
 }

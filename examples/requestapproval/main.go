@@ -11,7 +11,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	approvalPolicy := protocol.AskForApproval([]byte(`"untrusted"`))
+	approvalPolicy := protocol.AskForApproval{Kind: protocol.AskForApprovalKindUntrusted}
 
 	client := codex.NewClient(codex.Config{
 		RequestHandler: func(_ context.Context, request codex.ServerRequest) (any, error) {

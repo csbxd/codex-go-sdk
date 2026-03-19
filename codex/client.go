@@ -164,9 +164,20 @@ func NewClient(config Config) *Client {
 func MarshalUserInput(value any) (protocol.UserInput, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return nil, err
+		return protocol.UserInput{}, err
 	}
-	return protocol.UserInput(raw), nil
+
+	var input protocol.UserInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return protocol.UserInput{}, err
+	}
+	if !input.Type.IsValid() {
+		if input.Type == "" {
+			return protocol.UserInput{}, errors.New("user input type is empty")
+		}
+		return protocol.UserInput{}, fmt.Errorf("unknown user input type %q", input.Type)
+	}
+	return input, nil
 }
 
 // MustUserInput converts an input item into the generated protocol type and

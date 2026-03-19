@@ -85,7 +85,7 @@ func main() {
 - When your local Codex config pins an aggressive default reasoning effort, pass an explicit supported value such as `protocol.ReasoningEffortMedium` for `gpt-5` turns.
 - `NextNotification(ctx)` returns typed payloads when a method exists in the generated notification registry.
 - `WaitForTurnCompleted(ctx, turnID)` and `StreamUntilMethods(ctx, methods...)` help consume the notification stream.
-- Status helpers in `codex/protocol/` expose `IsTerminal` / `CanTransitionTo` for turn, item, hook, plan, and collab statuses, plus `ParseThreadStatus` for the raw `ThreadStatus` union.
+- Status helpers in `codex/protocol/` expose `IsTerminal` / `CanTransitionTo` for turn, item, hook, plan, and collab statuses, plus `ParseThreadStatus` for validating `ThreadStatus`.
 - `RetryOnOverload` retries only the documented overload JSON-RPC error (`-32001`) and leaves all other retry policy explicit.
 
 Generated protocol types live under the [`codex/protocol/`](./codex/protocol) package.
@@ -99,7 +99,7 @@ Most status enums in [`codex/protocol/`](./codex/protocol) expose two helper met
 
 For these helpers, terminal means "no forward transition is allowed anymore", and self-transitions are treated as valid (`status.CanTransitionTo(status) == true`).
 
-`ThreadStatus` is the exception. In the wire schema it is a tagged union, so the generated Go type is raw JSON. Decode it with `protocol.ParseThreadStatus`, `Thread.StatusState()`, or `ThreadStatusChangedNotification.StatusState()`.
+`ThreadStatus` is the exception. In the wire schema it is a tagged union, so the generated Go type is a discriminator struct with `Type` plus optional `ActiveFlags`. Validate it with `protocol.ParseThreadStatus`, `Thread.StatusState()`, or `ThreadStatusChangedNotification.StatusState()`.
 
 ```go
 read, err := client.ThreadRead(ctx, &protocol.ThreadReadParams{

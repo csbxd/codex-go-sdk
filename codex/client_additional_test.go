@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,10 @@ func (r *recordingWriteCloser) Close() error {
 func TestMarshalUserInputHelpers(t *testing.T) {
 	t.Parallel()
 
+	stringPtr := func(v string) *string {
+		return &v
+	}
+
 	input, err := MarshalUserInput(map[string]any{
 		"type": "text",
 		"text": "hello",
@@ -45,12 +50,20 @@ func TestMarshalUserInputHelpers(t *testing.T) {
 		t.Fatalf("MarshalUserInput() error = %v", err)
 	}
 
-	var decoded map[string]any
-	if err := json.Unmarshal(input, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(input) error = %v", err)
+	want := protocol.UserInput{
+		Type: protocol.UserInputTypeText,
+		Text: stringPtr("hello"),
 	}
-	if decoded["type"] != "text" || decoded["text"] != "hello" {
-		t.Fatalf("MarshalUserInput() = %#v, want text payload", decoded)
+	if !reflect.DeepEqual(input, want) {
+		t.Fatalf("MarshalUserInput() = %#v, want %#v", input, want)
+	}
+
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("json.Marshal(input) error = %v", err)
+	}
+	if string(encoded) != `{"type":"text","text":"hello"}` {
+		t.Fatalf("json.Marshal(input) = %s, want text payload", encoded)
 	}
 
 	if _, err := MarshalUserInput(make(chan int)); err == nil {

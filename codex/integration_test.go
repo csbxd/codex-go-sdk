@@ -134,7 +134,7 @@ func TestIntegrationFileChangeFlow(t *testing.T) {
 
 	model := selectIntegrationModel(t, ctx, client)
 	effort := chooseApprovalEffort(t, model)
-	approvalPolicy := protocol.AskForApproval([]byte(`"untrusted"`))
+	approvalPolicy := protocol.AskForApproval{Kind: protocol.AskForApprovalKindUntrusted}
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
 		ApprovalPolicy: &approvalPolicy,

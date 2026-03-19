@@ -139,7 +139,37 @@ type schemaEnumValue struct {
 }
 
 type goRenderer struct {
-	needsJSONImport bool
+	needsJSONImport      bool
+	emittedSyntheticType map[string]struct{}
+}
+
+type taggedUnionFieldSpec struct {
+	WireName  string
+	FieldName string
+	Schema    *schemaNode
+	Required  bool
+}
+
+type taggedObjectUnionSpec struct {
+	TypeName    string
+	Fields      []taggedUnionFieldSpec
+	TagValues   []string
+	TagTypeName string
+}
+
+type stringObjectVariantSpec struct {
+	FieldName     string
+	FieldTypeExpr ast.Expr
+	FieldTypeName string
+	FieldSchema   *schemaNode
+	WireName      string
+}
+
+type stringObjectUnionSpec struct {
+	KindTypeName string
+	StringValues []string
+	TypeName     string
+	Variants     []stringObjectVariantSpec
 }
 
 func main() {
@@ -516,16 +546,23 @@ func (g *generator) renderGeneratedTypesSource() (string, error) {
 		return "", err
 	}
 
-	renderer := &goRenderer{}
+	renderer := &goRenderer{
+		emittedSyntheticType: make(map[string]struct{}),
+	}
 	blocks := make([]string, 0, len(selected)+1)
 	for _, name := range selected {
-		for _, decl := range renderer.topLevelDecl(name, definitions[name]) {
+		decls, extraBlocks, err := renderer.renderTypeBlocks(name, definitions[name])
+		if err != nil {
+			return "", err
+		}
+		for _, decl := range decls {
 			block, err := formatDecl(decl)
 			if err != nil {
 				return "", err
 			}
 			blocks = append(blocks, block)
 		}
+		blocks = append(blocks, extraBlocks...)
 	}
 
 	if renderer.needsJSONImport {
@@ -937,6 +974,16 @@ func goTypeName(name string) string {
 	return toPascalCase(name)
 }
 
+func goPrivateName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	runes := []rune(name)
+	runes[0] = unicode.ToLower(runes[0])
+	return string(runes)
+}
+
 func goConstName(typeName, literal string) string {
 	return typeName + toPascalCase(literal)
 }
@@ -998,6 +1045,39 @@ func (r *goRenderer) fieldType(schema *schemaNode, required bool) ast.Expr {
 	return expr
 }
 
+func (r *goRenderer) renderTypeBlocks(name string, schema *schemaNode) ([]ast.Decl, []string, error) {
+	normalized, _ := normalizeSchema(schema)
+	typeName := goTypeName(name)
+
+	if spec, ok := r.scalarUnionSpec(typeName, normalized); ok {
+		r.needsJSONImport = true
+		return nil, []string{r.scalarUnionBlock(spec)}, nil
+	}
+
+	if spec, ok, err := r.stringObjectUnionSpec(typeName, normalized); ok || err != nil {
+		if err != nil {
+			return nil, nil, err
+		}
+		r.needsJSONImport = true
+		return nil, []string{r.stringObjectUnionBlock(spec)}, nil
+	}
+
+	if spec, ok, err := r.taggedObjectUnionSpec(typeName, normalized); ok || err != nil {
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, []string{r.taggedObjectUnionBlock(spec)}, nil
+	}
+
+	decls := r.topLevelDecl(name, schema)
+	extraBlocks := make([]string, 0, 1)
+	if isStringEnum(normalized) {
+		values, _ := normalized.Enum.Strings()
+		extraBlocks = append(extraBlocks, r.stringEnumHelpersBlock(typeName, values))
+	}
+	return decls, extraBlocks, nil
+}
+
 func (r *goRenderer) topLevelDecl(name string, schema *schemaNode) []ast.Decl {
 	normalized, _ := normalizeSchema(schema)
 	typeName := goTypeName(name)
@@ -1043,6 +1123,448 @@ func (r *goRenderer) stringEnumDecls(typeName string, schema *schemaNode) []ast.
 			Specs: specs,
 		},
 	}
+}
+
+func (r *goRenderer) stringEnumHelpersBlock(typeName string, values []string) string {
+	varName := goPrivateName(typeName) + "Values"
+
+	lines := make([]string, 0, len(values)+10)
+	lines = append(lines, fmt.Sprintf("var %s = map[string]%s{", varName, typeName))
+	for _, value := range values {
+		lines = append(lines, fmt.Sprintf("\t%q: %s,", value, goConstName(typeName, value)))
+	}
+	lines = append(lines, "}")
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("func Parse%s(value string) (%s, bool) {", typeName, typeName))
+	lines = append(lines, fmt.Sprintf("\treturn parseStringEnum[%s](value, %s)", typeName, varName))
+	lines = append(lines, "}")
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("func (v %s) IsValid() bool {", typeName))
+	lines = append(lines, fmt.Sprintf("\treturn isValidStringEnum(v, %s)", varName))
+	lines = append(lines, "}")
+	return strings.Join(lines, "\n")
+}
+
+func (r *goRenderer) scalarUnionSpec(typeName string, schema *schemaNode) (string, bool) {
+	if typeName != "RequestId" || schema == nil {
+		return "", false
+	}
+
+	branches := schema.AnyOf
+	if len(branches) == 0 {
+		branches = schema.OneOf
+	}
+	if len(branches) != 2 {
+		return "", false
+	}
+
+	hasString := false
+	hasInteger := false
+	for _, branch := range branches {
+		branchNode := branch.NodeOrNil()
+		if branchNode == nil {
+			return "", false
+		}
+		switch {
+		case branchNode.Type.IsSingle("string"):
+			hasString = true
+		case branchNode.Type.IsSingle("integer"):
+			hasInteger = true
+		default:
+			return "", false
+		}
+	}
+
+	return typeName, hasString && hasInteger
+}
+
+func (r *goRenderer) scalarUnionBlock(typeName string) string {
+	lines := []string{
+		fmt.Sprintf("type %s struct {", typeName),
+		"\tString  *string `json:\"-\"`",
+		"\tInteger *int64  `json:\"-\"`",
+		"}",
+		"",
+		fmt.Sprintf("func %sFromString(value string) %s {", typeName, typeName),
+		fmt.Sprintf("\treturn %s{String: &value}", typeName),
+		"}",
+		"",
+		fmt.Sprintf("func %sFromInteger(value int64) %s {", typeName, typeName),
+		fmt.Sprintf("\treturn %s{Integer: &value}", typeName),
+		"}",
+		"",
+		fmt.Sprintf("func (v %s) MarshalJSON() ([]byte, error) {", typeName),
+		"\treturn marshalStringOrInt64Union(v.String, v.Integer)",
+		"}",
+		"",
+		fmt.Sprintf("func (v *%s) UnmarshalJSON(data []byte) error {", typeName),
+		fmt.Sprintf("\t*v = %s{}", typeName),
+		"\tstringValue, integerValue, err := unmarshalStringOrInt64Union(data)",
+		"\tif err != nil {",
+		"\t\treturn err",
+		"\t}",
+		"\tv.String = stringValue",
+		"\tv.Integer = integerValue",
+		"\treturn nil",
+		"}",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r *goRenderer) stringObjectUnionSpec(
+	typeName string,
+	schema *schemaNode,
+) (stringObjectUnionSpec, bool, error) {
+	if schema == nil || len(schema.OneOf) == 0 {
+		return stringObjectUnionSpec{}, false, nil
+	}
+
+	spec := stringObjectUnionSpec{
+		KindTypeName: typeName + "Kind",
+		TypeName:     typeName,
+	}
+
+	foundStringBranch := false
+	for _, branch := range schema.OneOf {
+		branchNode := branch.NodeOrNil()
+		if branchNode == nil {
+			return stringObjectUnionSpec{}, false, nil
+		}
+
+		if isStringEnum(branchNode) {
+			if foundStringBranch {
+				return stringObjectUnionSpec{}, false, nil
+			}
+			foundStringBranch = true
+			values, _ := branchNode.Enum.Strings()
+			spec.StringValues = append(spec.StringValues, values...)
+			continue
+		}
+
+		if !branchNode.Type.IsSingle("object") || len(branchNode.Properties) != 1 || len(branchNode.Required) != 1 {
+			return stringObjectUnionSpec{}, false, nil
+		}
+
+		wireName := branchNode.Required[0]
+		propertyValue, ok := branchNode.Properties[wireName]
+		if !ok {
+			return stringObjectUnionSpec{}, false, nil
+		}
+
+		fieldSchema := propertyValue.NodeOrNil()
+		fieldTypeName := ""
+		var fieldTypeExpr ast.Expr = anyIdent()
+		if fieldSchema != nil {
+			if fieldSchema.Ref != "" {
+				fieldTypeExpr = r.typeExpr(fieldSchema)
+			} else if fieldSchema.Type.IsSingle("object") && len(fieldSchema.Properties) != 0 {
+				fieldTypeName = typeName + goTypeName(wireName)
+				fieldTypeExpr = ident(fieldTypeName)
+			} else {
+				fieldTypeExpr = r.typeExpr(fieldSchema)
+			}
+		}
+
+		spec.Variants = append(spec.Variants, stringObjectVariantSpec{
+			FieldName:     goFieldName(wireName),
+			FieldTypeExpr: fieldTypeExpr,
+			FieldTypeName: fieldTypeName,
+			FieldSchema:   fieldSchema,
+			WireName:      wireName,
+		})
+	}
+
+	if !foundStringBranch || len(spec.Variants) == 0 {
+		return stringObjectUnionSpec{}, false, nil
+	}
+
+	sort.Strings(spec.StringValues)
+	sort.Slice(spec.Variants, func(i, j int) bool {
+		return spec.Variants[i].FieldName < spec.Variants[j].FieldName
+	})
+	return spec, true, nil
+}
+
+func (r *goRenderer) stringObjectUnionBlock(spec stringObjectUnionSpec) string {
+	blocks := make([]string, 0, len(spec.Variants)+4)
+
+	for _, variant := range spec.Variants {
+		if variant.FieldTypeName == "" {
+			continue
+		}
+		branchBlocks, err := r.syntheticTypeBlocks(variant.FieldTypeName, variant.FieldSchema)
+		if err == nil && len(branchBlocks) > 0 {
+			blocks = append(blocks, branchBlocks...)
+		}
+	}
+
+	typeDecls := r.stringEnumDecls(spec.KindTypeName, &schemaNode{
+		Type: schemaType{Values: []string{"string"}},
+		Enum: schemaEnum{Values: func() []schemaEnumValue {
+			values := make([]schemaEnumValue, 0, len(spec.StringValues))
+			for _, value := range spec.StringValues {
+				values = append(values, schemaEnumValue{
+					Kind:        schemaEnumValueString,
+					StringValue: value,
+				})
+			}
+			return values
+		}()},
+	})
+	for _, decl := range typeDecls {
+		block, err := formatDecl(decl)
+		if err == nil {
+			blocks = append(blocks, block)
+		}
+	}
+	blocks = append(blocks, r.stringEnumHelpersBlock(spec.KindTypeName, spec.StringValues))
+
+	fields := make([]*ast.Field, 0, len(spec.Variants)+1)
+	fields = append(fields, &ast.Field{
+		Names: []*ast.Ident{ident("Kind")},
+		Type:  ident(spec.KindTypeName),
+		Tag: &ast.BasicLit{
+			Kind:  token.STRING,
+			Value: fmt.Sprintf("`json:%q`", "-"),
+		},
+	})
+	for _, variant := range spec.Variants {
+		fields = append(fields, &ast.Field{
+			Names: []*ast.Ident{ident(variant.FieldName)},
+			Type:  &ast.StarExpr{X: variant.FieldTypeExpr},
+			Tag: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("`json:%q`", "-"),
+			},
+		})
+	}
+
+	unionDecl, _ := formatDecl(typeDecl(&ast.TypeSpec{
+		Name: ident(spec.TypeName),
+		Type: &ast.StructType{
+			Fields: &ast.FieldList{List: fields},
+		},
+	}))
+	blocks = append(blocks, unionDecl)
+
+	marshalLines := []string{
+		fmt.Sprintf("func (v %s) MarshalJSON() ([]byte, error) {", spec.TypeName),
+		fmt.Sprintf("\treturn marshalStringOrSingleFieldObjectUnion(v.Kind,"),
+	}
+	for _, variant := range spec.Variants {
+		marshalLines = append(marshalLines,
+			fmt.Sprintf("\t\tobjectUnionField{name: %q, value: v.%s},", variant.WireName, variant.FieldName),
+		)
+	}
+	marshalLines = append(marshalLines, "\t)", "}")
+	blocks = append(blocks, strings.Join(marshalLines, "\n"))
+
+	unmarshalLines := []string{
+		fmt.Sprintf("func (v *%s) UnmarshalJSON(data []byte) error {", spec.TypeName),
+		fmt.Sprintf("\t*v = %s{}", spec.TypeName),
+		fmt.Sprintf("\tkind, err := unmarshalStringOrSingleFieldObjectUnion[%s](data, %s, map[string]func(json.RawMessage) error{",
+			spec.KindTypeName,
+			goPrivateName(spec.KindTypeName)+"Values",
+		),
+	}
+	for _, variant := range spec.Variants {
+		unmarshalLines = append(unmarshalLines, fmt.Sprintf("\t\t%q: func(raw json.RawMessage) error {", variant.WireName))
+		unmarshalLines = append(unmarshalLines, fmt.Sprintf("\t\t\tvar payload %s", mustFormatExpr(variant.FieldTypeExpr)))
+		unmarshalLines = append(unmarshalLines, "\t\t\tif err := json.Unmarshal(raw, &payload); err != nil {")
+		unmarshalLines = append(unmarshalLines, "\t\t\t\treturn err")
+		unmarshalLines = append(unmarshalLines, "\t\t\t}")
+		unmarshalLines = append(unmarshalLines, fmt.Sprintf("\t\t\tv.%s = &payload", variant.FieldName))
+		unmarshalLines = append(unmarshalLines, "\t\t\treturn nil")
+		unmarshalLines = append(unmarshalLines, "\t\t},")
+	}
+	unmarshalLines = append(unmarshalLines, "\t})")
+	unmarshalLines = append(unmarshalLines, "\tif err != nil {")
+	unmarshalLines = append(unmarshalLines, "\t\treturn err")
+	unmarshalLines = append(unmarshalLines, "\t}")
+	unmarshalLines = append(unmarshalLines, "\tv.Kind = kind")
+	unmarshalLines = append(unmarshalLines, "\treturn nil")
+	unmarshalLines = append(unmarshalLines, "}")
+	blocks = append(blocks, strings.Join(unmarshalLines, "\n"))
+
+	return strings.Join(blocks, "\n\n")
+}
+
+func (r *goRenderer) taggedObjectUnionSpec(
+	typeName string,
+	schema *schemaNode,
+) (taggedObjectUnionSpec, bool, error) {
+	if schema == nil || len(schema.OneOf) == 0 {
+		return taggedObjectUnionSpec{}, false, nil
+	}
+
+	type fieldSeen struct {
+		signature string
+		schema    *schemaNode
+		count     int
+		required  int
+	}
+
+	seenFields := make(map[string]*fieldSeen)
+	tagValues := make([]string, 0, len(schema.OneOf))
+
+	for _, branch := range schema.OneOf {
+		branchNode := branch.NodeOrNil()
+		if branchNode == nil || !branchNode.Type.IsSingle("object") {
+			return taggedObjectUnionSpec{}, false, nil
+		}
+
+		typeValue, ok := branchNode.Properties["type"]
+		if !ok || typeValue.Node == nil {
+			return taggedObjectUnionSpec{}, false, nil
+		}
+		values, ok := typeValue.Node.Enum.Strings()
+		if !ok || len(values) != 1 {
+			return taggedObjectUnionSpec{}, false, nil
+		}
+		tagValues = append(tagValues, values[0])
+
+		requiredSet := make(map[string]struct{}, len(branchNode.Required))
+		for _, required := range branchNode.Required {
+			requiredSet[required] = struct{}{}
+		}
+
+		for wireName, property := range branchNode.Properties {
+			if wireName == "type" || property.Node == nil {
+				continue
+			}
+
+			signature, err := formatExpr(r.fieldType(property.Node, false))
+			if err != nil {
+				return taggedObjectUnionSpec{}, false, err
+			}
+
+			entry, ok := seenFields[wireName]
+			if !ok {
+				entry = &fieldSeen{
+					signature: signature,
+					schema:    property.Node,
+				}
+				seenFields[wireName] = entry
+			} else if entry.signature != signature {
+				return taggedObjectUnionSpec{}, false, nil
+			}
+
+			entry.count++
+			if _, required := requiredSet[wireName]; required {
+				entry.required++
+			}
+		}
+	}
+
+	spec := taggedObjectUnionSpec{
+		TypeName:    typeName,
+		TagTypeName: typeName + "Type",
+		TagValues:   tagValues,
+	}
+
+	for wireName, field := range seenFields {
+		spec.Fields = append(spec.Fields, taggedUnionFieldSpec{
+			WireName:  wireName,
+			FieldName: goFieldName(wireName),
+			Schema:    field.schema,
+			Required:  field.count == len(schema.OneOf) && field.required == len(schema.OneOf),
+		})
+	}
+	sort.Strings(spec.TagValues)
+	sort.Slice(spec.Fields, func(i, j int) bool {
+		return spec.Fields[i].FieldName < spec.Fields[j].FieldName
+	})
+
+	return spec, true, nil
+}
+
+func (r *goRenderer) taggedObjectUnionBlock(spec taggedObjectUnionSpec) string {
+	blocks := make([]string, 0, 3)
+
+	typeDecls := r.stringEnumDecls(spec.TagTypeName, &schemaNode{
+		Type: schemaType{Values: []string{"string"}},
+		Enum: schemaEnum{Values: func() []schemaEnumValue {
+			values := make([]schemaEnumValue, 0, len(spec.TagValues))
+			for _, value := range spec.TagValues {
+				values = append(values, schemaEnumValue{
+					Kind:        schemaEnumValueString,
+					StringValue: value,
+				})
+			}
+			return values
+		}()},
+	})
+	for _, decl := range typeDecls {
+		block, err := formatDecl(decl)
+		if err == nil {
+			blocks = append(blocks, block)
+		}
+	}
+	blocks = append(blocks, r.stringEnumHelpersBlock(spec.TagTypeName, spec.TagValues))
+
+	fields := make([]*ast.Field, 0, len(spec.Fields)+1)
+	fields = append(fields, &ast.Field{
+		Names: []*ast.Ident{ident("Type")},
+		Type:  ident(spec.TagTypeName),
+		Tag: &ast.BasicLit{
+			Kind:  token.STRING,
+			Value: fmt.Sprintf("`json:%q`", "type"),
+		},
+	})
+	for _, field := range spec.Fields {
+		tag := field.WireName + ",omitempty"
+		if field.Required {
+			tag = field.WireName
+		}
+		fields = append(fields, &ast.Field{
+			Names: []*ast.Ident{ident(field.FieldName)},
+			Type:  r.fieldType(field.Schema, field.Required),
+			Tag: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("`json:%q`", tag),
+			},
+		})
+	}
+
+	structDecl, _ := formatDecl(typeDecl(&ast.TypeSpec{
+		Name: ident(spec.TypeName),
+		Type: &ast.StructType{
+			Fields: &ast.FieldList{List: fields},
+		},
+	}))
+	blocks = append(blocks, structDecl)
+	return strings.Join(blocks, "\n\n")
+}
+
+func (r *goRenderer) syntheticTypeBlocks(name string, schema *schemaNode) ([]string, error) {
+	if _, ok := r.emittedSyntheticType[name]; ok {
+		return nil, nil
+	}
+	r.emittedSyntheticType[name] = struct{}{}
+
+	decls, extraBlocks, err := r.renderTypeBlocks(name, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks := make([]string, 0, len(decls)+len(extraBlocks))
+	for _, decl := range decls {
+		block, err := formatDecl(decl)
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, block)
+	}
+	blocks = append(blocks, extraBlocks...)
+	return blocks, nil
+}
+
+func mustFormatExpr(expr ast.Expr) string {
+	formatted, err := formatExpr(expr)
+	if err != nil {
+		panic(err)
+	}
+	return formatted
 }
 
 func (r *goRenderer) structDecl(typeName string, schema *schemaNode) ast.Decl {
@@ -1095,6 +1617,50 @@ func (r *goRenderer) structDecl(typeName string, schema *schemaNode) ast.Decl {
 	})
 }
 
+func (r *goRenderer) anonymousStructExpr(schema *schemaNode) ast.Expr {
+	if schema == nil || len(schema.Properties) == 0 {
+		return mapTypeExpr(ident("string"), anyIdent())
+	}
+
+	requiredSet := make(map[string]struct{}, len(schema.Required))
+	for _, name := range schema.Required {
+		requiredSet[name] = struct{}{}
+	}
+
+	propNames := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		propNames = append(propNames, name)
+	}
+	sort.Strings(propNames)
+
+	fields := make([]*ast.Field, 0, len(propNames))
+	for _, wireName := range propNames {
+		fieldType := ast.Expr(anyIdent())
+		if propSchema, ok := schema.Properties[wireName]; ok && propSchema.Node != nil {
+			_, required := requiredSet[wireName]
+			fieldType = r.fieldType(propSchema.Node, required)
+		}
+
+		tag := wireName + ",omitempty"
+		if _, required := requiredSet[wireName]; required {
+			tag = wireName
+		}
+
+		fields = append(fields, &ast.Field{
+			Names: []*ast.Ident{ident(goFieldName(wireName))},
+			Type:  fieldType,
+			Tag: &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("`json:%q`", tag),
+			},
+		})
+	}
+
+	return &ast.StructType{
+		Fields: &ast.FieldList{List: fields},
+	}
+}
+
 func (r *goRenderer) typeExprForValue(value *schemaValue) ast.Expr {
 	if value == nil {
 		return anyIdent()
@@ -1143,7 +1709,7 @@ func (r *goRenderer) typeExpr(schema *schemaNode) ast.Expr {
 		}
 	case normalized.Type.IsSingle("object"):
 		if len(normalized.Properties) != 0 {
-			return mapTypeExpr(ident("string"), anyIdent())
+			return r.anonymousStructExpr(normalized)
 		}
 		switch {
 		case normalized.AdditionalProperties == nil:

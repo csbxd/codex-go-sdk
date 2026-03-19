@@ -603,9 +603,11 @@ func sampleThread(threadID string) map[string]any {
 		"modelProvider": "openai",
 		"preview":       "Test thread",
 		"source":        "appServer",
-		"status":        "loaded",
-		"turns":         []any{},
-		"updatedAt":     1,
+		"status": map[string]any{
+			"type": "idle",
+		},
+		"turns":     []any{},
+		"updatedAt": 1,
 	}
 }
 

@@ -106,7 +106,80 @@ const (
 	ApprovalsReviewerGuardianSubagent ApprovalsReviewer = "guardian_subagent"
 )
 
-type AskForApproval = json.RawMessage
+var approvalsReviewerValues = map[string]ApprovalsReviewer{
+	"user":              ApprovalsReviewerUser,
+	"guardian_subagent": ApprovalsReviewerGuardianSubagent,
+}
+
+func ParseApprovalsReviewer(value string) (ApprovalsReviewer, bool) {
+	return parseStringEnum[ApprovalsReviewer](value, approvalsReviewerValues)
+}
+
+func (v ApprovalsReviewer) IsValid() bool {
+	return isValidStringEnum(v, approvalsReviewerValues)
+}
+
+type AskForApprovalGranular struct {
+	MCPElicitations    bool  `json:"mcp_elicitations"`
+	RequestPermissions *bool `json:"request_permissions,omitempty"`
+	Rules              bool  `json:"rules"`
+	SandboxApproval    bool  `json:"sandbox_approval"`
+	SkillApproval      *bool `json:"skill_approval,omitempty"`
+}
+
+type AskForApprovalKind string
+
+const (
+	AskForApprovalKindNever     AskForApprovalKind = "never"
+	AskForApprovalKindOnFailure AskForApprovalKind = "on-failure"
+	AskForApprovalKindOnRequest AskForApprovalKind = "on-request"
+	AskForApprovalKindUntrusted AskForApprovalKind = "untrusted"
+)
+
+var askForApprovalKindValues = map[string]AskForApprovalKind{
+	"never":      AskForApprovalKindNever,
+	"on-failure": AskForApprovalKindOnFailure,
+	"on-request": AskForApprovalKindOnRequest,
+	"untrusted":  AskForApprovalKindUntrusted,
+}
+
+func ParseAskForApprovalKind(value string) (AskForApprovalKind, bool) {
+	return parseStringEnum[AskForApprovalKind](value, askForApprovalKindValues)
+}
+
+func (v AskForApprovalKind) IsValid() bool {
+	return isValidStringEnum(v, askForApprovalKindValues)
+}
+
+type AskForApproval struct {
+	Kind     AskForApprovalKind      `json:"-"`
+	Granular *AskForApprovalGranular `json:"-"`
+}
+
+func (v AskForApproval) MarshalJSON() ([]byte, error) {
+	return marshalStringOrSingleFieldObjectUnion(v.Kind,
+		objectUnionField{name: "granular", value: v.Granular},
+	)
+}
+
+func (v *AskForApproval) UnmarshalJSON(data []byte) error {
+	*v = AskForApproval{}
+	kind, err := unmarshalStringOrSingleFieldObjectUnion[AskForApprovalKind](data, askForApprovalKindValues, map[string]func(json.RawMessage) error{
+		"granular": func(raw json.RawMessage) error {
+			var payload AskForApprovalGranular
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.Granular = &payload
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	v.Kind = kind
+	return nil
+}
 
 type AuthMode string
 
@@ -115,6 +188,20 @@ const (
 	AuthModeChatgpt           AuthMode = "chatgpt"
 	AuthModeChatgptAuthTokens AuthMode = "chatgptAuthTokens"
 )
+
+var authModeValues = map[string]AuthMode{
+	"apikey":            AuthModeApikey,
+	"chatgpt":           AuthModeChatgpt,
+	"chatgptAuthTokens": AuthModeChatgptAuthTokens,
+}
+
+func ParseAuthMode(value string) (AuthMode, bool) {
+	return parseStringEnum[AuthMode](value, authModeValues)
+}
+
+func (v AuthMode) IsValid() bool {
+	return isValidStringEnum(v, authModeValues)
+}
 
 type ByteRange struct {
 	End   uint64 `json:"end"`
@@ -130,13 +217,133 @@ type ChatgptAuthTokensRefreshReason string
 
 const ChatgptAuthTokensRefreshReasonUnauthorized ChatgptAuthTokensRefreshReason = "unauthorized"
 
+var chatgptAuthTokensRefreshReasonValues = map[string]ChatgptAuthTokensRefreshReason{
+	"unauthorized": ChatgptAuthTokensRefreshReasonUnauthorized,
+}
+
+func ParseChatgptAuthTokensRefreshReason(value string) (ChatgptAuthTokensRefreshReason, bool) {
+	return parseStringEnum[ChatgptAuthTokensRefreshReason](value, chatgptAuthTokensRefreshReasonValues)
+}
+
+func (v ChatgptAuthTokensRefreshReason) IsValid() bool {
+	return isValidStringEnum(v, chatgptAuthTokensRefreshReasonValues)
+}
+
 type ClientInfo struct {
 	Name    string  `json:"name"`
 	Title   *string `json:"title,omitempty"`
 	Version string  `json:"version"`
 }
 
-type CodexErrorInfo = json.RawMessage
+type CodexErrorInfoHttpConnectionFailed struct {
+	HttpStatusCode *uint16 `json:"httpStatusCode,omitempty"`
+}
+
+type CodexErrorInfoResponseStreamConnectionFailed struct {
+	HttpStatusCode *uint16 `json:"httpStatusCode,omitempty"`
+}
+
+type CodexErrorInfoResponseStreamDisconnected struct {
+	HttpStatusCode *uint16 `json:"httpStatusCode,omitempty"`
+}
+
+type CodexErrorInfoResponseTooManyFailedAttempts struct {
+	HttpStatusCode *uint16 `json:"httpStatusCode,omitempty"`
+}
+
+type CodexErrorInfoKind string
+
+const (
+	CodexErrorInfoKindBadRequest            CodexErrorInfoKind = "badRequest"
+	CodexErrorInfoKindContextWindowExceeded CodexErrorInfoKind = "contextWindowExceeded"
+	CodexErrorInfoKindInternalServerError   CodexErrorInfoKind = "internalServerError"
+	CodexErrorInfoKindOther                 CodexErrorInfoKind = "other"
+	CodexErrorInfoKindSandboxError          CodexErrorInfoKind = "sandboxError"
+	CodexErrorInfoKindServerOverloaded      CodexErrorInfoKind = "serverOverloaded"
+	CodexErrorInfoKindThreadRollbackFailed  CodexErrorInfoKind = "threadRollbackFailed"
+	CodexErrorInfoKindUnauthorized          CodexErrorInfoKind = "unauthorized"
+	CodexErrorInfoKindUsageLimitExceeded    CodexErrorInfoKind = "usageLimitExceeded"
+)
+
+var codexErrorInfoKindValues = map[string]CodexErrorInfoKind{
+	"badRequest":            CodexErrorInfoKindBadRequest,
+	"contextWindowExceeded": CodexErrorInfoKindContextWindowExceeded,
+	"internalServerError":   CodexErrorInfoKindInternalServerError,
+	"other":                 CodexErrorInfoKindOther,
+	"sandboxError":          CodexErrorInfoKindSandboxError,
+	"serverOverloaded":      CodexErrorInfoKindServerOverloaded,
+	"threadRollbackFailed":  CodexErrorInfoKindThreadRollbackFailed,
+	"unauthorized":          CodexErrorInfoKindUnauthorized,
+	"usageLimitExceeded":    CodexErrorInfoKindUsageLimitExceeded,
+}
+
+func ParseCodexErrorInfoKind(value string) (CodexErrorInfoKind, bool) {
+	return parseStringEnum[CodexErrorInfoKind](value, codexErrorInfoKindValues)
+}
+
+func (v CodexErrorInfoKind) IsValid() bool {
+	return isValidStringEnum(v, codexErrorInfoKindValues)
+}
+
+type CodexErrorInfo struct {
+	Kind                           CodexErrorInfoKind                            `json:"-"`
+	HttpConnectionFailed           *CodexErrorInfoHttpConnectionFailed           `json:"-"`
+	ResponseStreamConnectionFailed *CodexErrorInfoResponseStreamConnectionFailed `json:"-"`
+	ResponseStreamDisconnected     *CodexErrorInfoResponseStreamDisconnected     `json:"-"`
+	ResponseTooManyFailedAttempts  *CodexErrorInfoResponseTooManyFailedAttempts  `json:"-"`
+}
+
+func (v CodexErrorInfo) MarshalJSON() ([]byte, error) {
+	return marshalStringOrSingleFieldObjectUnion(v.Kind,
+		objectUnionField{name: "httpConnectionFailed", value: v.HttpConnectionFailed},
+		objectUnionField{name: "responseStreamConnectionFailed", value: v.ResponseStreamConnectionFailed},
+		objectUnionField{name: "responseStreamDisconnected", value: v.ResponseStreamDisconnected},
+		objectUnionField{name: "responseTooManyFailedAttempts", value: v.ResponseTooManyFailedAttempts},
+	)
+}
+
+func (v *CodexErrorInfo) UnmarshalJSON(data []byte) error {
+	*v = CodexErrorInfo{}
+	kind, err := unmarshalStringOrSingleFieldObjectUnion[CodexErrorInfoKind](data, codexErrorInfoKindValues, map[string]func(json.RawMessage) error{
+		"httpConnectionFailed": func(raw json.RawMessage) error {
+			var payload CodexErrorInfoHttpConnectionFailed
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.HttpConnectionFailed = &payload
+			return nil
+		},
+		"responseStreamConnectionFailed": func(raw json.RawMessage) error {
+			var payload CodexErrorInfoResponseStreamConnectionFailed
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.ResponseStreamConnectionFailed = &payload
+			return nil
+		},
+		"responseStreamDisconnected": func(raw json.RawMessage) error {
+			var payload CodexErrorInfoResponseStreamDisconnected
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.ResponseStreamDisconnected = &payload
+			return nil
+		},
+		"responseTooManyFailedAttempts": func(raw json.RawMessage) error {
+			var payload CodexErrorInfoResponseTooManyFailedAttempts
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.ResponseTooManyFailedAttempts = &payload
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	v.Kind = kind
+	return nil
+}
 
 type CollabAgentState struct {
 	Message *string           `json:"message,omitempty"`
@@ -155,6 +362,24 @@ const (
 	CollabAgentStatusNotFound    CollabAgentStatus = "notFound"
 )
 
+var collabAgentStatusValues = map[string]CollabAgentStatus{
+	"pendingInit": CollabAgentStatusPendingInit,
+	"running":     CollabAgentStatusRunning,
+	"interrupted": CollabAgentStatusInterrupted,
+	"completed":   CollabAgentStatusCompleted,
+	"errored":     CollabAgentStatusErrored,
+	"shutdown":    CollabAgentStatusShutdown,
+	"notFound":    CollabAgentStatusNotFound,
+}
+
+func ParseCollabAgentStatus(value string) (CollabAgentStatus, bool) {
+	return parseStringEnum[CollabAgentStatus](value, collabAgentStatusValues)
+}
+
+func (v CollabAgentStatus) IsValid() bool {
+	return isValidStringEnum(v, collabAgentStatusValues)
+}
+
 type CollabAgentTool string
 
 const (
@@ -165,6 +390,22 @@ const (
 	CollabAgentToolCloseAgent  CollabAgentTool = "closeAgent"
 )
 
+var collabAgentToolValues = map[string]CollabAgentTool{
+	"spawnAgent":  CollabAgentToolSpawnAgent,
+	"sendInput":   CollabAgentToolSendInput,
+	"resumeAgent": CollabAgentToolResumeAgent,
+	"wait":        CollabAgentToolWait,
+	"closeAgent":  CollabAgentToolCloseAgent,
+}
+
+func ParseCollabAgentTool(value string) (CollabAgentTool, bool) {
+	return parseStringEnum[CollabAgentTool](value, collabAgentToolValues)
+}
+
+func (v CollabAgentTool) IsValid() bool {
+	return isValidStringEnum(v, collabAgentToolValues)
+}
+
 type CollabAgentToolCallStatus string
 
 const (
@@ -173,7 +414,51 @@ const (
 	CollabAgentToolCallStatusFailed     CollabAgentToolCallStatus = "failed"
 )
 
-type CommandAction = json.RawMessage
+var collabAgentToolCallStatusValues = map[string]CollabAgentToolCallStatus{
+	"inProgress": CollabAgentToolCallStatusInProgress,
+	"completed":  CollabAgentToolCallStatusCompleted,
+	"failed":     CollabAgentToolCallStatusFailed,
+}
+
+func ParseCollabAgentToolCallStatus(value string) (CollabAgentToolCallStatus, bool) {
+	return parseStringEnum[CollabAgentToolCallStatus](value, collabAgentToolCallStatusValues)
+}
+
+func (v CollabAgentToolCallStatus) IsValid() bool {
+	return isValidStringEnum(v, collabAgentToolCallStatusValues)
+}
+
+type CommandActionType string
+
+const (
+	CommandActionTypeListFiles CommandActionType = "listFiles"
+	CommandActionTypeRead      CommandActionType = "read"
+	CommandActionTypeSearch    CommandActionType = "search"
+	CommandActionTypeUnknown   CommandActionType = "unknown"
+)
+
+var commandActionTypeValues = map[string]CommandActionType{
+	"listFiles": CommandActionTypeListFiles,
+	"read":      CommandActionTypeRead,
+	"search":    CommandActionTypeSearch,
+	"unknown":   CommandActionTypeUnknown,
+}
+
+func ParseCommandActionType(value string) (CommandActionType, bool) {
+	return parseStringEnum[CommandActionType](value, commandActionTypeValues)
+}
+
+func (v CommandActionType) IsValid() bool {
+	return isValidStringEnum(v, commandActionTypeValues)
+}
+
+type CommandAction struct {
+	Type    CommandActionType `json:"type"`
+	Command string            `json:"command"`
+	Name    *string           `json:"name,omitempty"`
+	Path    *string           `json:"path,omitempty"`
+	Query   *string           `json:"query,omitempty"`
+}
 
 type CommandExecOutputDeltaNotification struct {
 	CapReached  bool                    `json:"capReached"`
@@ -188,6 +473,19 @@ const (
 	CommandExecOutputStreamStdout CommandExecOutputStream = "stdout"
 	CommandExecOutputStreamStderr CommandExecOutputStream = "stderr"
 )
+
+var commandExecOutputStreamValues = map[string]CommandExecOutputStream{
+	"stdout": CommandExecOutputStreamStdout,
+	"stderr": CommandExecOutputStreamStderr,
+}
+
+func ParseCommandExecOutputStream(value string) (CommandExecOutputStream, bool) {
+	return parseStringEnum[CommandExecOutputStream](value, commandExecOutputStreamValues)
+}
+
+func (v CommandExecOutputStream) IsValid() bool {
+	return isValidStringEnum(v, commandExecOutputStreamValues)
+}
 
 type CommandExecutionOutputDeltaNotification struct {
 	Delta    string `json:"delta"`
@@ -219,6 +517,21 @@ const (
 	CommandExecutionStatusDeclined   CommandExecutionStatus = "declined"
 )
 
+var commandExecutionStatusValues = map[string]CommandExecutionStatus{
+	"inProgress": CommandExecutionStatusInProgress,
+	"completed":  CommandExecutionStatusCompleted,
+	"failed":     CommandExecutionStatusFailed,
+	"declined":   CommandExecutionStatusDeclined,
+}
+
+func ParseCommandExecutionStatus(value string) (CommandExecutionStatus, bool) {
+	return parseStringEnum[CommandExecutionStatus](value, commandExecutionStatusValues)
+}
+
+func (v CommandExecutionStatus) IsValid() bool {
+	return isValidStringEnum(v, commandExecutionStatusValues)
+}
+
 type ConfigWarningNotification struct {
 	Details *string    `json:"details,omitempty"`
 	Path    *string    `json:"path,omitempty"`
@@ -242,7 +555,31 @@ type DeprecationNoticeNotification struct {
 	Summary string  `json:"summary"`
 }
 
-type DynamicToolCallOutputContentItem = json.RawMessage
+type DynamicToolCallOutputContentItemType string
+
+const (
+	DynamicToolCallOutputContentItemTypeInputImage DynamicToolCallOutputContentItemType = "inputImage"
+	DynamicToolCallOutputContentItemTypeInputText  DynamicToolCallOutputContentItemType = "inputText"
+)
+
+var dynamicToolCallOutputContentItemTypeValues = map[string]DynamicToolCallOutputContentItemType{
+	"inputImage": DynamicToolCallOutputContentItemTypeInputImage,
+	"inputText":  DynamicToolCallOutputContentItemTypeInputText,
+}
+
+func ParseDynamicToolCallOutputContentItemType(value string) (DynamicToolCallOutputContentItemType, bool) {
+	return parseStringEnum[DynamicToolCallOutputContentItemType](value, dynamicToolCallOutputContentItemTypeValues)
+}
+
+func (v DynamicToolCallOutputContentItemType) IsValid() bool {
+	return isValidStringEnum(v, dynamicToolCallOutputContentItemTypeValues)
+}
+
+type DynamicToolCallOutputContentItem struct {
+	Type     DynamicToolCallOutputContentItemType `json:"type"`
+	ImageUrl *string                              `json:"imageUrl,omitempty"`
+	Text     *string                              `json:"text,omitempty"`
+}
 
 type DynamicToolCallParams struct {
 	Arguments any    `json:"arguments"`
@@ -259,6 +596,20 @@ const (
 	DynamicToolCallStatusCompleted  DynamicToolCallStatus = "completed"
 	DynamicToolCallStatusFailed     DynamicToolCallStatus = "failed"
 )
+
+var dynamicToolCallStatusValues = map[string]DynamicToolCallStatus{
+	"inProgress": DynamicToolCallStatusInProgress,
+	"completed":  DynamicToolCallStatusCompleted,
+	"failed":     DynamicToolCallStatusFailed,
+}
+
+func ParseDynamicToolCallStatus(value string) (DynamicToolCallStatus, bool) {
+	return parseStringEnum[DynamicToolCallStatus](value, dynamicToolCallStatusValues)
+}
+
+func (v DynamicToolCallStatus) IsValid() bool {
+	return isValidStringEnum(v, dynamicToolCallStatusValues)
+}
 
 type ErrorNotification struct {
 	Error     TurnError `json:"error"`
@@ -277,7 +628,34 @@ type ExecCommandApprovalParams struct {
 	Reason         *string         `json:"reason,omitempty"`
 }
 
-type FileChange = json.RawMessage
+type FileChangeType string
+
+const (
+	FileChangeTypeAdd    FileChangeType = "add"
+	FileChangeTypeDelete FileChangeType = "delete"
+	FileChangeTypeUpdate FileChangeType = "update"
+)
+
+var fileChangeTypeValues = map[string]FileChangeType{
+	"add":    FileChangeTypeAdd,
+	"delete": FileChangeTypeDelete,
+	"update": FileChangeTypeUpdate,
+}
+
+func ParseFileChangeType(value string) (FileChangeType, bool) {
+	return parseStringEnum[FileChangeType](value, fileChangeTypeValues)
+}
+
+func (v FileChangeType) IsValid() bool {
+	return isValidStringEnum(v, fileChangeTypeValues)
+}
+
+type FileChange struct {
+	Type        FileChangeType `json:"type"`
+	Content     *string        `json:"content,omitempty"`
+	MovePath    *string        `json:"move_path,omitempty"`
+	UnifiedDiff *string        `json:"unified_diff,omitempty"`
+}
 
 type FileChangeOutputDeltaNotification struct {
 	Delta    string `json:"delta"`
@@ -340,6 +718,21 @@ const (
 	GuardianApprovalReviewStatusAborted    GuardianApprovalReviewStatus = "aborted"
 )
 
+var guardianApprovalReviewStatusValues = map[string]GuardianApprovalReviewStatus{
+	"inProgress": GuardianApprovalReviewStatusInProgress,
+	"approved":   GuardianApprovalReviewStatusApproved,
+	"denied":     GuardianApprovalReviewStatusDenied,
+	"aborted":    GuardianApprovalReviewStatusAborted,
+}
+
+func ParseGuardianApprovalReviewStatus(value string) (GuardianApprovalReviewStatus, bool) {
+	return parseStringEnum[GuardianApprovalReviewStatus](value, guardianApprovalReviewStatusValues)
+}
+
+func (v GuardianApprovalReviewStatus) IsValid() bool {
+	return isValidStringEnum(v, guardianApprovalReviewStatusValues)
+}
+
 type GuardianRiskLevel string
 
 const (
@@ -347,6 +740,20 @@ const (
 	GuardianRiskLevelMedium GuardianRiskLevel = "medium"
 	GuardianRiskLevelHigh   GuardianRiskLevel = "high"
 )
+
+var guardianRiskLevelValues = map[string]GuardianRiskLevel{
+	"low":    GuardianRiskLevelLow,
+	"medium": GuardianRiskLevelMedium,
+	"high":   GuardianRiskLevelHigh,
+}
+
+func ParseGuardianRiskLevel(value string) (GuardianRiskLevel, bool) {
+	return parseStringEnum[GuardianRiskLevel](value, guardianRiskLevelValues)
+}
+
+func (v GuardianRiskLevel) IsValid() bool {
+	return isValidStringEnum(v, guardianRiskLevelValues)
+}
 
 type HookCompletedNotification struct {
 	Run      HookRunSummary `json:"run"`
@@ -362,12 +769,39 @@ const (
 	HookEventNameStop             HookEventName = "stop"
 )
 
+var hookEventNameValues = map[string]HookEventName{
+	"sessionStart":     HookEventNameSessionStart,
+	"userPromptSubmit": HookEventNameUserPromptSubmit,
+	"stop":             HookEventNameStop,
+}
+
+func ParseHookEventName(value string) (HookEventName, bool) {
+	return parseStringEnum[HookEventName](value, hookEventNameValues)
+}
+
+func (v HookEventName) IsValid() bool {
+	return isValidStringEnum(v, hookEventNameValues)
+}
+
 type HookExecutionMode string
 
 const (
 	HookExecutionModeSync  HookExecutionMode = "sync"
 	HookExecutionModeAsync HookExecutionMode = "async"
 )
+
+var hookExecutionModeValues = map[string]HookExecutionMode{
+	"sync":  HookExecutionModeSync,
+	"async": HookExecutionModeAsync,
+}
+
+func ParseHookExecutionMode(value string) (HookExecutionMode, bool) {
+	return parseStringEnum[HookExecutionMode](value, hookExecutionModeValues)
+}
+
+func (v HookExecutionMode) IsValid() bool {
+	return isValidStringEnum(v, hookExecutionModeValues)
+}
 
 type HookHandlerType string
 
@@ -376,6 +810,20 @@ const (
 	HookHandlerTypePrompt  HookHandlerType = "prompt"
 	HookHandlerTypeAgent   HookHandlerType = "agent"
 )
+
+var hookHandlerTypeValues = map[string]HookHandlerType{
+	"command": HookHandlerTypeCommand,
+	"prompt":  HookHandlerTypePrompt,
+	"agent":   HookHandlerTypeAgent,
+}
+
+func ParseHookHandlerType(value string) (HookHandlerType, bool) {
+	return parseStringEnum[HookHandlerType](value, hookHandlerTypeValues)
+}
+
+func (v HookHandlerType) IsValid() bool {
+	return isValidStringEnum(v, hookHandlerTypeValues)
+}
 
 type HookOutputEntry struct {
 	Kind HookOutputEntryKind `json:"kind"`
@@ -392,6 +840,22 @@ const (
 	HookOutputEntryKindError    HookOutputEntryKind = "error"
 )
 
+var hookOutputEntryKindValues = map[string]HookOutputEntryKind{
+	"warning":  HookOutputEntryKindWarning,
+	"stop":     HookOutputEntryKindStop,
+	"feedback": HookOutputEntryKindFeedback,
+	"context":  HookOutputEntryKindContext,
+	"error":    HookOutputEntryKindError,
+}
+
+func ParseHookOutputEntryKind(value string) (HookOutputEntryKind, bool) {
+	return parseStringEnum[HookOutputEntryKind](value, hookOutputEntryKindValues)
+}
+
+func (v HookOutputEntryKind) IsValid() bool {
+	return isValidStringEnum(v, hookOutputEntryKindValues)
+}
+
 type HookRunStatus string
 
 const (
@@ -401,6 +865,22 @@ const (
 	HookRunStatusBlocked   HookRunStatus = "blocked"
 	HookRunStatusStopped   HookRunStatus = "stopped"
 )
+
+var hookRunStatusValues = map[string]HookRunStatus{
+	"running":   HookRunStatusRunning,
+	"completed": HookRunStatusCompleted,
+	"failed":    HookRunStatusFailed,
+	"blocked":   HookRunStatusBlocked,
+	"stopped":   HookRunStatusStopped,
+}
+
+func ParseHookRunStatus(value string) (HookRunStatus, bool) {
+	return parseStringEnum[HookRunStatus](value, hookRunStatusValues)
+}
+
+func (v HookRunStatus) IsValid() bool {
+	return isValidStringEnum(v, hookRunStatusValues)
+}
 
 type HookRunSummary struct {
 	CompletedAt   *int64            `json:"completedAt,omitempty"`
@@ -424,6 +904,19 @@ const (
 	HookScopeThread HookScope = "thread"
 	HookScopeTurn   HookScope = "turn"
 )
+
+var hookScopeValues = map[string]HookScope{
+	"thread": HookScopeThread,
+	"turn":   HookScopeTurn,
+}
+
+func ParseHookScope(value string) (HookScope, bool) {
+	return parseStringEnum[HookScope](value, hookScopeValues)
+}
+
+func (v HookScope) IsValid() bool {
+	return isValidStringEnum(v, hookScopeValues)
+}
 
 type HookStartedNotification struct {
 	Run      HookRunSummary `json:"run"`
@@ -453,6 +946,19 @@ const (
 	InputModalityText  InputModality = "text"
 	InputModalityImage InputModality = "image"
 )
+
+var inputModalityValues = map[string]InputModality{
+	"text":  InputModalityText,
+	"image": InputModalityImage,
+}
+
+func ParseInputModality(value string) (InputModality, bool) {
+	return parseStringEnum[InputModality](value, inputModalityValues)
+}
+
+func (v InputModality) IsValid() bool {
+	return isValidStringEnum(v, inputModalityValues)
+}
 
 type ItemCompletedNotification struct {
 	Item     ThreadItem `json:"item"`
@@ -486,6 +992,18 @@ type McpElicitationArrayType string
 
 const McpElicitationArrayTypeArray McpElicitationArrayType = "array"
 
+var mcpElicitationArrayTypeValues = map[string]McpElicitationArrayType{
+	"array": McpElicitationArrayTypeArray,
+}
+
+func ParseMcpElicitationArrayType(value string) (McpElicitationArrayType, bool) {
+	return parseStringEnum[McpElicitationArrayType](value, mcpElicitationArrayTypeValues)
+}
+
+func (v McpElicitationArrayType) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationArrayTypeValues)
+}
+
 type McpElicitationBooleanSchema struct {
 	Default     *bool                     `json:"default,omitempty"`
 	Description *string                   `json:"description,omitempty"`
@@ -496,6 +1014,18 @@ type McpElicitationBooleanSchema struct {
 type McpElicitationBooleanType string
 
 const McpElicitationBooleanTypeBoolean McpElicitationBooleanType = "boolean"
+
+var mcpElicitationBooleanTypeValues = map[string]McpElicitationBooleanType{
+	"boolean": McpElicitationBooleanTypeBoolean,
+}
+
+func ParseMcpElicitationBooleanType(value string) (McpElicitationBooleanType, bool) {
+	return parseStringEnum[McpElicitationBooleanType](value, mcpElicitationBooleanTypeValues)
+}
+
+func (v McpElicitationBooleanType) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationBooleanTypeValues)
+}
 
 type McpElicitationConstOption struct {
 	Const string `json:"const"`
@@ -531,9 +1061,34 @@ const (
 	McpElicitationNumberTypeInteger McpElicitationNumberType = "integer"
 )
 
+var mcpElicitationNumberTypeValues = map[string]McpElicitationNumberType{
+	"number":  McpElicitationNumberTypeNumber,
+	"integer": McpElicitationNumberTypeInteger,
+}
+
+func ParseMcpElicitationNumberType(value string) (McpElicitationNumberType, bool) {
+	return parseStringEnum[McpElicitationNumberType](value, mcpElicitationNumberTypeValues)
+}
+
+func (v McpElicitationNumberType) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationNumberTypeValues)
+}
+
 type McpElicitationObjectType string
 
 const McpElicitationObjectTypeObject McpElicitationObjectType = "object"
+
+var mcpElicitationObjectTypeValues = map[string]McpElicitationObjectType{
+	"object": McpElicitationObjectTypeObject,
+}
+
+func ParseMcpElicitationObjectType(value string) (McpElicitationObjectType, bool) {
+	return parseStringEnum[McpElicitationObjectType](value, mcpElicitationObjectTypeValues)
+}
+
+func (v McpElicitationObjectType) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationObjectTypeValues)
+}
 
 type McpElicitationPrimitiveSchema = json.RawMessage
 
@@ -555,6 +1110,21 @@ const (
 	McpElicitationStringFormatDateTime McpElicitationStringFormat = "date-time"
 )
 
+var mcpElicitationStringFormatValues = map[string]McpElicitationStringFormat{
+	"email":     McpElicitationStringFormatEmail,
+	"uri":       McpElicitationStringFormatURI,
+	"date":      McpElicitationStringFormatDate,
+	"date-time": McpElicitationStringFormatDateTime,
+}
+
+func ParseMcpElicitationStringFormat(value string) (McpElicitationStringFormat, bool) {
+	return parseStringEnum[McpElicitationStringFormat](value, mcpElicitationStringFormatValues)
+}
+
+func (v McpElicitationStringFormat) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationStringFormatValues)
+}
+
 type McpElicitationStringSchema struct {
 	Default     *string                     `json:"default,omitempty"`
 	Description *string                     `json:"description,omitempty"`
@@ -568,6 +1138,18 @@ type McpElicitationStringSchema struct {
 type McpElicitationStringType string
 
 const McpElicitationStringTypeString McpElicitationStringType = "string"
+
+var mcpElicitationStringTypeValues = map[string]McpElicitationStringType{
+	"string": McpElicitationStringTypeString,
+}
+
+func ParseMcpElicitationStringType(value string) (McpElicitationStringType, bool) {
+	return parseStringEnum[McpElicitationStringType](value, mcpElicitationStringTypeValues)
+}
+
+func (v McpElicitationStringType) IsValid() bool {
+	return isValidStringEnum(v, mcpElicitationStringTypeValues)
+}
 
 type McpElicitationTitledEnumItems struct {
 	AnyOf []McpElicitationConstOption `json:"anyOf"`
@@ -650,6 +1232,20 @@ const (
 	McpToolCallStatusFailed     McpToolCallStatus = "failed"
 )
 
+var mcpToolCallStatusValues = map[string]McpToolCallStatus{
+	"inProgress": McpToolCallStatusInProgress,
+	"completed":  McpToolCallStatusCompleted,
+	"failed":     McpToolCallStatusFailed,
+}
+
+func ParseMcpToolCallStatus(value string) (McpToolCallStatus, bool) {
+	return parseStringEnum[McpToolCallStatus](value, mcpToolCallStatusValues)
+}
+
+func (v McpToolCallStatus) IsValid() bool {
+	return isValidStringEnum(v, mcpToolCallStatusValues)
+}
+
 type MemoryCitation struct {
 	Entries   []MemoryCitationEntry `json:"entries"`
 	ThreadIds []string              `json:"threadIds"`
@@ -668,6 +1264,19 @@ const (
 	MessagePhaseCommentary  MessagePhase = "commentary"
 	MessagePhaseFinalAnswer MessagePhase = "final_answer"
 )
+
+var messagePhaseValues = map[string]MessagePhase{
+	"commentary":   MessagePhaseCommentary,
+	"final_answer": MessagePhaseFinalAnswer,
+}
+
+func ParseMessagePhase(value string) (MessagePhase, bool) {
+	return parseStringEnum[MessagePhase](value, messagePhaseValues)
+}
+
+func (v MessagePhase) IsValid() bool {
+	return isValidStringEnum(v, messagePhaseValues)
+}
 
 type Model struct {
 	AvailabilityNux           *ModelAvailabilityNux   `json:"availabilityNux,omitempty"`
@@ -704,6 +1313,18 @@ type ModelRerouteReason string
 
 const ModelRerouteReasonHighRiskCyberActivity ModelRerouteReason = "highRiskCyberActivity"
 
+var modelRerouteReasonValues = map[string]ModelRerouteReason{
+	"highRiskCyberActivity": ModelRerouteReasonHighRiskCyberActivity,
+}
+
+func ParseModelRerouteReason(value string) (ModelRerouteReason, bool) {
+	return parseStringEnum[ModelRerouteReason](value, modelRerouteReasonValues)
+}
+
+func (v ModelRerouteReason) IsValid() bool {
+	return isValidStringEnum(v, modelRerouteReasonValues)
+}
+
 type ModelReroutedNotification struct {
 	FromModel string             `json:"fromModel"`
 	Reason    ModelRerouteReason `json:"reason"`
@@ -726,6 +1347,19 @@ const (
 	NetworkAccessEnabled    NetworkAccess = "enabled"
 )
 
+var networkAccessValues = map[string]NetworkAccess{
+	"restricted": NetworkAccessRestricted,
+	"enabled":    NetworkAccessEnabled,
+}
+
+func ParseNetworkAccess(value string) (NetworkAccess, bool) {
+	return parseStringEnum[NetworkAccess](value, networkAccessValues)
+}
+
+func (v NetworkAccess) IsValid() bool {
+	return isValidStringEnum(v, networkAccessValues)
+}
+
 type NetworkApprovalContext struct {
 	Host     string                  `json:"host"`
 	Protocol NetworkApprovalProtocol `json:"protocol"`
@@ -740,6 +1374,21 @@ const (
 	NetworkApprovalProtocolSocks5Udp NetworkApprovalProtocol = "socks5Udp"
 )
 
+var networkApprovalProtocolValues = map[string]NetworkApprovalProtocol{
+	"http":      NetworkApprovalProtocolHttp,
+	"https":     NetworkApprovalProtocolHttps,
+	"socks5Tcp": NetworkApprovalProtocolSocks5Tcp,
+	"socks5Udp": NetworkApprovalProtocolSocks5Udp,
+}
+
+func ParseNetworkApprovalProtocol(value string) (NetworkApprovalProtocol, bool) {
+	return parseStringEnum[NetworkApprovalProtocol](value, networkApprovalProtocolValues)
+}
+
+func (v NetworkApprovalProtocol) IsValid() bool {
+	return isValidStringEnum(v, networkApprovalProtocolValues)
+}
+
 type NetworkPolicyAmendment struct {
 	Action NetworkPolicyRuleAction `json:"action"`
 	Host   string                  `json:"host"`
@@ -752,7 +1401,50 @@ const (
 	NetworkPolicyRuleActionDeny  NetworkPolicyRuleAction = "deny"
 )
 
-type ParsedCommand = json.RawMessage
+var networkPolicyRuleActionValues = map[string]NetworkPolicyRuleAction{
+	"allow": NetworkPolicyRuleActionAllow,
+	"deny":  NetworkPolicyRuleActionDeny,
+}
+
+func ParseNetworkPolicyRuleAction(value string) (NetworkPolicyRuleAction, bool) {
+	return parseStringEnum[NetworkPolicyRuleAction](value, networkPolicyRuleActionValues)
+}
+
+func (v NetworkPolicyRuleAction) IsValid() bool {
+	return isValidStringEnum(v, networkPolicyRuleActionValues)
+}
+
+type ParsedCommandType string
+
+const (
+	ParsedCommandTypeListFiles ParsedCommandType = "list_files"
+	ParsedCommandTypeRead      ParsedCommandType = "read"
+	ParsedCommandTypeSearch    ParsedCommandType = "search"
+	ParsedCommandTypeUnknown   ParsedCommandType = "unknown"
+)
+
+var parsedCommandTypeValues = map[string]ParsedCommandType{
+	"list_files": ParsedCommandTypeListFiles,
+	"read":       ParsedCommandTypeRead,
+	"search":     ParsedCommandTypeSearch,
+	"unknown":    ParsedCommandTypeUnknown,
+}
+
+func ParseParsedCommandType(value string) (ParsedCommandType, bool) {
+	return parseStringEnum[ParsedCommandType](value, parsedCommandTypeValues)
+}
+
+func (v ParsedCommandType) IsValid() bool {
+	return isValidStringEnum(v, parsedCommandTypeValues)
+}
+
+type ParsedCommand struct {
+	Type  ParsedCommandType `json:"type"`
+	Cmd   string            `json:"cmd"`
+	Name  *string           `json:"name,omitempty"`
+	Path  *string           `json:"path,omitempty"`
+	Query *string           `json:"query,omitempty"`
+}
 
 type PatchApplyStatus string
 
@@ -763,7 +1455,47 @@ const (
 	PatchApplyStatusDeclined   PatchApplyStatus = "declined"
 )
 
-type PatchChangeKind = json.RawMessage
+var patchApplyStatusValues = map[string]PatchApplyStatus{
+	"inProgress": PatchApplyStatusInProgress,
+	"completed":  PatchApplyStatusCompleted,
+	"failed":     PatchApplyStatusFailed,
+	"declined":   PatchApplyStatusDeclined,
+}
+
+func ParsePatchApplyStatus(value string) (PatchApplyStatus, bool) {
+	return parseStringEnum[PatchApplyStatus](value, patchApplyStatusValues)
+}
+
+func (v PatchApplyStatus) IsValid() bool {
+	return isValidStringEnum(v, patchApplyStatusValues)
+}
+
+type PatchChangeKindType string
+
+const (
+	PatchChangeKindTypeAdd    PatchChangeKindType = "add"
+	PatchChangeKindTypeDelete PatchChangeKindType = "delete"
+	PatchChangeKindTypeUpdate PatchChangeKindType = "update"
+)
+
+var patchChangeKindTypeValues = map[string]PatchChangeKindType{
+	"add":    PatchChangeKindTypeAdd,
+	"delete": PatchChangeKindTypeDelete,
+	"update": PatchChangeKindTypeUpdate,
+}
+
+func ParsePatchChangeKindType(value string) (PatchChangeKindType, bool) {
+	return parseStringEnum[PatchChangeKindType](value, patchChangeKindTypeValues)
+}
+
+func (v PatchChangeKindType) IsValid() bool {
+	return isValidStringEnum(v, patchChangeKindTypeValues)
+}
+
+type PatchChangeKind struct {
+	Type     PatchChangeKindType `json:"type"`
+	MovePath *string             `json:"move_path,omitempty"`
+}
 
 type PermissionsRequestApprovalParams struct {
 	ItemId      string                   `json:"itemId"`
@@ -780,6 +1512,20 @@ const (
 	PersonalityFriendly  Personality = "friendly"
 	PersonalityPragmatic Personality = "pragmatic"
 )
+
+var personalityValues = map[string]Personality{
+	"none":      PersonalityNone,
+	"friendly":  PersonalityFriendly,
+	"pragmatic": PersonalityPragmatic,
+}
+
+func ParsePersonality(value string) (Personality, bool) {
+	return parseStringEnum[Personality](value, personalityValues)
+}
+
+func (v Personality) IsValid() bool {
+	return isValidStringEnum(v, personalityValues)
+}
 
 type PlanDeltaNotification struct {
 	Delta    string `json:"delta"`
@@ -802,6 +1548,26 @@ const (
 	PlanTypeUnknown    PlanType = "unknown"
 )
 
+var planTypeValues = map[string]PlanType{
+	"free":       PlanTypeFree,
+	"go":         PlanTypeGo,
+	"plus":       PlanTypePlus,
+	"pro":        PlanTypePro,
+	"team":       PlanTypeTeam,
+	"business":   PlanTypeBusiness,
+	"enterprise": PlanTypeEnterprise,
+	"edu":        PlanTypeEdu,
+	"unknown":    PlanTypeUnknown,
+}
+
+func ParsePlanType(value string) (PlanType, bool) {
+	return parseStringEnum[PlanType](value, planTypeValues)
+}
+
+func (v PlanType) IsValid() bool {
+	return isValidStringEnum(v, planTypeValues)
+}
+
 type RateLimitSnapshot struct {
 	Credits   *CreditsSnapshot `json:"credits,omitempty"`
 	LimitId   *string          `json:"limitId,omitempty"`
@@ -817,7 +1583,31 @@ type RateLimitWindow struct {
 	WindowDurationMins *int64 `json:"windowDurationMins,omitempty"`
 }
 
-type ReadOnlyAccess = json.RawMessage
+type ReadOnlyAccessType string
+
+const (
+	ReadOnlyAccessTypeFullAccess ReadOnlyAccessType = "fullAccess"
+	ReadOnlyAccessTypeRestricted ReadOnlyAccessType = "restricted"
+)
+
+var readOnlyAccessTypeValues = map[string]ReadOnlyAccessType{
+	"fullAccess": ReadOnlyAccessTypeFullAccess,
+	"restricted": ReadOnlyAccessTypeRestricted,
+}
+
+func ParseReadOnlyAccessType(value string) (ReadOnlyAccessType, bool) {
+	return parseStringEnum[ReadOnlyAccessType](value, readOnlyAccessTypeValues)
+}
+
+func (v ReadOnlyAccessType) IsValid() bool {
+	return isValidStringEnum(v, readOnlyAccessTypeValues)
+}
+
+type ReadOnlyAccess struct {
+	Type                    ReadOnlyAccessType `json:"type"`
+	IncludePlatformDefaults *bool              `json:"includePlatformDefaults,omitempty"`
+	ReadableRoots           []AbsolutePathBuf  `json:"readableRoots,omitempty"`
+}
 
 type RealtimeConversationVersion string
 
@@ -825,6 +1615,19 @@ const (
 	RealtimeConversationVersionV1 RealtimeConversationVersion = "v1"
 	RealtimeConversationVersionV2 RealtimeConversationVersion = "v2"
 )
+
+var realtimeConversationVersionValues = map[string]RealtimeConversationVersion{
+	"v1": RealtimeConversationVersionV1,
+	"v2": RealtimeConversationVersionV2,
+}
+
+func ParseRealtimeConversationVersion(value string) (RealtimeConversationVersion, bool) {
+	return parseStringEnum[RealtimeConversationVersion](value, realtimeConversationVersionValues)
+}
+
+func (v RealtimeConversationVersion) IsValid() bool {
+	return isValidStringEnum(v, realtimeConversationVersionValues)
+}
 
 type ReasoningEffort string
 
@@ -836,6 +1639,23 @@ const (
 	ReasoningEffortHigh    ReasoningEffort = "high"
 	ReasoningEffortXhigh   ReasoningEffort = "xhigh"
 )
+
+var reasoningEffortValues = map[string]ReasoningEffort{
+	"none":    ReasoningEffortNone,
+	"minimal": ReasoningEffortMinimal,
+	"low":     ReasoningEffortLow,
+	"medium":  ReasoningEffortMedium,
+	"high":    ReasoningEffortHigh,
+	"xhigh":   ReasoningEffortXhigh,
+}
+
+func ParseReasoningEffort(value string) (ReasoningEffort, bool) {
+	return parseStringEnum[ReasoningEffort](value, reasoningEffortValues)
+}
+
+func (v ReasoningEffort) IsValid() bool {
+	return isValidStringEnum(v, reasoningEffortValues)
+}
 
 type ReasoningEffortOption struct {
 	Description     string          `json:"description"`
@@ -867,7 +1687,33 @@ type ReasoningTextDeltaNotification struct {
 	TurnId       string `json:"turnId"`
 }
 
-type RequestId = json.RawMessage
+type RequestId struct {
+	String  *string `json:"-"`
+	Integer *int64  `json:"-"`
+}
+
+func RequestIdFromString(value string) RequestId {
+	return RequestId{String: &value}
+}
+
+func RequestIdFromInteger(value int64) RequestId {
+	return RequestId{Integer: &value}
+}
+
+func (v RequestId) MarshalJSON() ([]byte, error) {
+	return marshalStringOrInt64Union(v.String, v.Integer)
+}
+
+func (v *RequestId) UnmarshalJSON(data []byte) error {
+	*v = RequestId{}
+	stringValue, integerValue, err := unmarshalStringOrInt64Union(data)
+	if err != nil {
+		return err
+	}
+	v.String = stringValue
+	v.Integer = integerValue
+	return nil
+}
 
 type RequestPermissionProfile struct {
 	FileSystem *AdditionalFileSystemPermissions `json:"fileSystem,omitempty"`
@@ -881,6 +1727,20 @@ const (
 	SandboxModeWorkspaceWrite   SandboxMode = "workspace-write"
 	SandboxModeDangerFullAccess SandboxMode = "danger-full-access"
 )
+
+var sandboxModeValues = map[string]SandboxMode{
+	"read-only":          SandboxModeReadOnly,
+	"workspace-write":    SandboxModeWorkspaceWrite,
+	"danger-full-access": SandboxModeDangerFullAccess,
+}
+
+func ParseSandboxMode(value string) (SandboxMode, bool) {
+	return parseStringEnum[SandboxMode](value, sandboxModeValues)
+}
+
+func (v SandboxMode) IsValid() bool {
+	return isValidStringEnum(v, sandboxModeValues)
+}
 
 type SandboxPolicy = json.RawMessage
 
@@ -896,11 +1756,155 @@ const (
 	ServiceTierFlex ServiceTier = "flex"
 )
 
-type SessionSource = json.RawMessage
+var serviceTierValues = map[string]ServiceTier{
+	"fast": ServiceTierFast,
+	"flex": ServiceTierFlex,
+}
+
+func ParseServiceTier(value string) (ServiceTier, bool) {
+	return parseStringEnum[ServiceTier](value, serviceTierValues)
+}
+
+func (v ServiceTier) IsValid() bool {
+	return isValidStringEnum(v, serviceTierValues)
+}
+
+type SessionSourceKind string
+
+const (
+	SessionSourceKindAppServer SessionSourceKind = "appServer"
+	SessionSourceKindCLI       SessionSourceKind = "cli"
+	SessionSourceKindExec      SessionSourceKind = "exec"
+	SessionSourceKindUnknown   SessionSourceKind = "unknown"
+	SessionSourceKindVscode    SessionSourceKind = "vscode"
+)
+
+var sessionSourceKindValues = map[string]SessionSourceKind{
+	"appServer": SessionSourceKindAppServer,
+	"cli":       SessionSourceKindCLI,
+	"exec":      SessionSourceKindExec,
+	"unknown":   SessionSourceKindUnknown,
+	"vscode":    SessionSourceKindVscode,
+}
+
+func ParseSessionSourceKind(value string) (SessionSourceKind, bool) {
+	return parseStringEnum[SessionSourceKind](value, sessionSourceKindValues)
+}
+
+func (v SessionSourceKind) IsValid() bool {
+	return isValidStringEnum(v, sessionSourceKindValues)
+}
+
+type SessionSource struct {
+	Kind     SessionSourceKind `json:"-"`
+	Custom   *string           `json:"-"`
+	SubAgent *SubAgentSource   `json:"-"`
+}
+
+func (v SessionSource) MarshalJSON() ([]byte, error) {
+	return marshalStringOrSingleFieldObjectUnion(v.Kind,
+		objectUnionField{name: "custom", value: v.Custom},
+		objectUnionField{name: "subAgent", value: v.SubAgent},
+	)
+}
+
+func (v *SessionSource) UnmarshalJSON(data []byte) error {
+	*v = SessionSource{}
+	kind, err := unmarshalStringOrSingleFieldObjectUnion[SessionSourceKind](data, sessionSourceKindValues, map[string]func(json.RawMessage) error{
+		"custom": func(raw json.RawMessage) error {
+			var payload string
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.Custom = &payload
+			return nil
+		},
+		"subAgent": func(raw json.RawMessage) error {
+			var payload SubAgentSource
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.SubAgent = &payload
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	v.Kind = kind
+	return nil
+}
 
 type SkillsChangedNotification map[string]any
 
-type SubAgentSource = json.RawMessage
+type SubAgentSourceThreadSpawn struct {
+	AgentNickname  *string  `json:"agent_nickname,omitempty"`
+	AgentRole      *string  `json:"agent_role,omitempty"`
+	Depth          int32    `json:"depth"`
+	ParentThreadID ThreadId `json:"parent_thread_id"`
+}
+
+type SubAgentSourceKind string
+
+const (
+	SubAgentSourceKindCompact             SubAgentSourceKind = "compact"
+	SubAgentSourceKindMemoryConsolidation SubAgentSourceKind = "memory_consolidation"
+	SubAgentSourceKindReview              SubAgentSourceKind = "review"
+)
+
+var subAgentSourceKindValues = map[string]SubAgentSourceKind{
+	"compact":              SubAgentSourceKindCompact,
+	"memory_consolidation": SubAgentSourceKindMemoryConsolidation,
+	"review":               SubAgentSourceKindReview,
+}
+
+func ParseSubAgentSourceKind(value string) (SubAgentSourceKind, bool) {
+	return parseStringEnum[SubAgentSourceKind](value, subAgentSourceKindValues)
+}
+
+func (v SubAgentSourceKind) IsValid() bool {
+	return isValidStringEnum(v, subAgentSourceKindValues)
+}
+
+type SubAgentSource struct {
+	Kind        SubAgentSourceKind         `json:"-"`
+	Other       *string                    `json:"-"`
+	ThreadSpawn *SubAgentSourceThreadSpawn `json:"-"`
+}
+
+func (v SubAgentSource) MarshalJSON() ([]byte, error) {
+	return marshalStringOrSingleFieldObjectUnion(v.Kind,
+		objectUnionField{name: "other", value: v.Other},
+		objectUnionField{name: "thread_spawn", value: v.ThreadSpawn},
+	)
+}
+
+func (v *SubAgentSource) UnmarshalJSON(data []byte) error {
+	*v = SubAgentSource{}
+	kind, err := unmarshalStringOrSingleFieldObjectUnion[SubAgentSourceKind](data, subAgentSourceKindValues, map[string]func(json.RawMessage) error{
+		"other": func(raw json.RawMessage) error {
+			var payload string
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.Other = &payload
+			return nil
+		},
+		"thread_spawn": func(raw json.RawMessage) error {
+			var payload SubAgentSourceThreadSpawn
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.ThreadSpawn = &payload
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	v.Kind = kind
+	return nil
+}
 
 type TerminalInteractionNotification struct {
 	ItemId    string `json:"itemId"`
@@ -950,6 +1954,19 @@ const (
 	ThreadActiveFlagWaitingOnApproval  ThreadActiveFlag = "waitingOnApproval"
 	ThreadActiveFlagWaitingOnUserInput ThreadActiveFlag = "waitingOnUserInput"
 )
+
+var threadActiveFlagValues = map[string]ThreadActiveFlag{
+	"waitingOnApproval":  ThreadActiveFlagWaitingOnApproval,
+	"waitingOnUserInput": ThreadActiveFlagWaitingOnUserInput,
+}
+
+func ParseThreadActiveFlag(value string) (ThreadActiveFlag, bool) {
+	return parseStringEnum[ThreadActiveFlag](value, threadActiveFlagValues)
+}
+
+func (v ThreadActiveFlag) IsValid() bool {
+	return isValidStringEnum(v, threadActiveFlagValues)
+}
 
 type ThreadArchiveParams struct {
 	ThreadId string `json:"threadId"`
@@ -1107,6 +2124,19 @@ const (
 	ThreadSortKeyUpdatedAt ThreadSortKey = "updated_at"
 )
 
+var threadSortKeyValues = map[string]ThreadSortKey{
+	"created_at": ThreadSortKeyCreatedAt,
+	"updated_at": ThreadSortKeyUpdatedAt,
+}
+
+func ParseThreadSortKey(value string) (ThreadSortKey, bool) {
+	return parseStringEnum[ThreadSortKey](value, threadSortKeyValues)
+}
+
+func (v ThreadSortKey) IsValid() bool {
+	return isValidStringEnum(v, threadSortKeyValues)
+}
+
 type ThreadSourceKind string
 
 const (
@@ -1114,6 +2144,7 @@ const (
 	ThreadSourceKindVscode              ThreadSourceKind = "vscode"
 	ThreadSourceKindExec                ThreadSourceKind = "exec"
 	ThreadSourceKindAppServer           ThreadSourceKind = "appServer"
+	ThreadSourceKindCustom              ThreadSourceKind = "custom"
 	ThreadSourceKindSubAgent            ThreadSourceKind = "subAgent"
 	ThreadSourceKindSubAgentReview      ThreadSourceKind = "subAgentReview"
 	ThreadSourceKindSubAgentCompact     ThreadSourceKind = "subAgentCompact"
@@ -1121,6 +2152,28 @@ const (
 	ThreadSourceKindSubAgentOther       ThreadSourceKind = "subAgentOther"
 	ThreadSourceKindUnknown             ThreadSourceKind = "unknown"
 )
+
+var threadSourceKindValues = map[string]ThreadSourceKind{
+	"cli":                 ThreadSourceKindCLI,
+	"vscode":              ThreadSourceKindVscode,
+	"exec":                ThreadSourceKindExec,
+	"appServer":           ThreadSourceKindAppServer,
+	"custom":              ThreadSourceKindCustom,
+	"subAgent":            ThreadSourceKindSubAgent,
+	"subAgentReview":      ThreadSourceKindSubAgentReview,
+	"subAgentCompact":     ThreadSourceKindSubAgentCompact,
+	"subAgentThreadSpawn": ThreadSourceKindSubAgentThreadSpawn,
+	"subAgentOther":       ThreadSourceKindSubAgentOther,
+	"unknown":             ThreadSourceKindUnknown,
+}
+
+func ParseThreadSourceKind(value string) (ThreadSourceKind, bool) {
+	return parseStringEnum[ThreadSourceKind](value, threadSourceKindValues)
+}
+
+func (v ThreadSourceKind) IsValid() bool {
+	return isValidStringEnum(v, threadSourceKindValues)
+}
 
 type ThreadStartParams struct {
 	ApprovalPolicy        *AskForApproval    `json:"approvalPolicy,omitempty"`
@@ -1154,7 +2207,34 @@ type ThreadStartedNotification struct {
 	Thread Thread `json:"thread"`
 }
 
-type ThreadStatus = json.RawMessage
+type ThreadStatusType string
+
+const (
+	ThreadStatusTypeActive      ThreadStatusType = "active"
+	ThreadStatusTypeIdle        ThreadStatusType = "idle"
+	ThreadStatusTypeNotLoaded   ThreadStatusType = "notLoaded"
+	ThreadStatusTypeSystemError ThreadStatusType = "systemError"
+)
+
+var threadStatusTypeValues = map[string]ThreadStatusType{
+	"active":      ThreadStatusTypeActive,
+	"idle":        ThreadStatusTypeIdle,
+	"notLoaded":   ThreadStatusTypeNotLoaded,
+	"systemError": ThreadStatusTypeSystemError,
+}
+
+func ParseThreadStatusType(value string) (ThreadStatusType, bool) {
+	return parseStringEnum[ThreadStatusType](value, threadStatusTypeValues)
+}
+
+func (v ThreadStatusType) IsValid() bool {
+	return isValidStringEnum(v, threadStatusTypeValues)
+}
+
+type ThreadStatus struct {
+	Type        ThreadStatusType   `json:"type"`
+	ActiveFlags []ThreadActiveFlag `json:"activeFlags,omitempty"`
+}
 
 type ThreadStatusChangedNotification struct {
 	Status   ThreadStatus `json:"status"`
@@ -1258,6 +2338,20 @@ const (
 	TurnPlanStepStatusCompleted  TurnPlanStepStatus = "completed"
 )
 
+var turnPlanStepStatusValues = map[string]TurnPlanStepStatus{
+	"pending":    TurnPlanStepStatusPending,
+	"inProgress": TurnPlanStepStatusInProgress,
+	"completed":  TurnPlanStepStatusCompleted,
+}
+
+func ParseTurnPlanStepStatus(value string) (TurnPlanStepStatus, bool) {
+	return parseStringEnum[TurnPlanStepStatus](value, turnPlanStepStatusValues)
+}
+
+func (v TurnPlanStepStatus) IsValid() bool {
+	return isValidStringEnum(v, turnPlanStepStatusValues)
+}
+
 type TurnPlanUpdatedNotification struct {
 	Explanation *string        `json:"explanation,omitempty"`
 	Plan        []TurnPlanStep `json:"plan"`
@@ -1298,6 +2392,21 @@ const (
 	TurnStatusInProgress  TurnStatus = "inProgress"
 )
 
+var turnStatusValues = map[string]TurnStatus{
+	"completed":   TurnStatusCompleted,
+	"interrupted": TurnStatusInterrupted,
+	"failed":      TurnStatusFailed,
+	"inProgress":  TurnStatusInProgress,
+}
+
+func ParseTurnStatus(value string) (TurnStatus, bool) {
+	return parseStringEnum[TurnStatus](value, turnStatusValues)
+}
+
+func (v TurnStatus) IsValid() bool {
+	return isValidStringEnum(v, turnStatusValues)
+}
+
 type TurnSteerParams struct {
 	ExpectedTurnId string      `json:"expectedTurnId"`
 	Input          []UserInput `json:"input"`
@@ -1308,9 +2417,72 @@ type TurnSteerResponse struct {
 	TurnId string `json:"turnId"`
 }
 
-type UserInput = json.RawMessage
+type UserInputType string
 
-type WebSearchAction = json.RawMessage
+const (
+	UserInputTypeImage      UserInputType = "image"
+	UserInputTypeLocalImage UserInputType = "localImage"
+	UserInputTypeMention    UserInputType = "mention"
+	UserInputTypeSkill      UserInputType = "skill"
+	UserInputTypeText       UserInputType = "text"
+)
+
+var userInputTypeValues = map[string]UserInputType{
+	"image":      UserInputTypeImage,
+	"localImage": UserInputTypeLocalImage,
+	"mention":    UserInputTypeMention,
+	"skill":      UserInputTypeSkill,
+	"text":       UserInputTypeText,
+}
+
+func ParseUserInputType(value string) (UserInputType, bool) {
+	return parseStringEnum[UserInputType](value, userInputTypeValues)
+}
+
+func (v UserInputType) IsValid() bool {
+	return isValidStringEnum(v, userInputTypeValues)
+}
+
+type UserInput struct {
+	Type         UserInputType `json:"type"`
+	Name         *string       `json:"name,omitempty"`
+	Path         *string       `json:"path,omitempty"`
+	Text         *string       `json:"text,omitempty"`
+	TextElements []TextElement `json:"text_elements,omitempty"`
+	URL          *string       `json:"url,omitempty"`
+}
+
+type WebSearchActionType string
+
+const (
+	WebSearchActionTypeFindInPage WebSearchActionType = "findInPage"
+	WebSearchActionTypeOpenPage   WebSearchActionType = "openPage"
+	WebSearchActionTypeOther      WebSearchActionType = "other"
+	WebSearchActionTypeSearch     WebSearchActionType = "search"
+)
+
+var webSearchActionTypeValues = map[string]WebSearchActionType{
+	"findInPage": WebSearchActionTypeFindInPage,
+	"openPage":   WebSearchActionTypeOpenPage,
+	"other":      WebSearchActionTypeOther,
+	"search":     WebSearchActionTypeSearch,
+}
+
+func ParseWebSearchActionType(value string) (WebSearchActionType, bool) {
+	return parseStringEnum[WebSearchActionType](value, webSearchActionTypeValues)
+}
+
+func (v WebSearchActionType) IsValid() bool {
+	return isValidStringEnum(v, webSearchActionTypeValues)
+}
+
+type WebSearchAction struct {
+	Type    WebSearchActionType `json:"type"`
+	Pattern *string             `json:"pattern,omitempty"`
+	Queries []string            `json:"queries,omitempty"`
+	Query   *string             `json:"query,omitempty"`
+	URL     *string             `json:"url,omitempty"`
+}
 
 type WindowsSandboxSetupCompletedNotification struct {
 	Error   *string                 `json:"error,omitempty"`
@@ -1324,6 +2496,19 @@ const (
 	WindowsSandboxSetupModeElevated   WindowsSandboxSetupMode = "elevated"
 	WindowsSandboxSetupModeUnelevated WindowsSandboxSetupMode = "unelevated"
 )
+
+var windowsSandboxSetupModeValues = map[string]WindowsSandboxSetupMode{
+	"elevated":   WindowsSandboxSetupModeElevated,
+	"unelevated": WindowsSandboxSetupModeUnelevated,
+}
+
+func ParseWindowsSandboxSetupMode(value string) (WindowsSandboxSetupMode, bool) {
+	return parseStringEnum[WindowsSandboxSetupMode](value, windowsSandboxSetupModeValues)
+}
+
+func (v WindowsSandboxSetupMode) IsValid() bool {
+	return isValidStringEnum(v, windowsSandboxSetupModeValues)
+}
 
 type WindowsWorldWritableWarningNotification struct {
 	ExtraCount  uint64   `json:"extraCount"`
