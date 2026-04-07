@@ -330,6 +330,69 @@ func TestTransportClosedIncludesStderrTail(t *testing.T) {
 	}
 }
 
+func TestTransportClosedWaitsForDelayedStderrTail(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(Config{
+		LaunchArgsOverride: helperArgs(),
+		Env: helperEnv(map[string]string{
+			"CODEX_GO_TEST_SCENARIO": "transport-close-delayed-stderr",
+		}),
+	})
+	defer func() {
+		_ = client.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.Open(ctx)
+	if err == nil {
+		t.Fatal("Open() error = nil, want TransportClosedError")
+	}
+
+	transportErr, ok := errors.AsType[*TransportClosedError](err)
+	if !ok {
+		t.Fatalf("Open() error = %T, want *TransportClosedError", err)
+	}
+	if !strings.Contains(transportErr.StderrTail, "helper delayed stderr boom") {
+		t.Fatalf("TransportClosedError stderr tail = %q, want helper delayed stderr boom", transportErr.StderrTail)
+	}
+}
+
+func TestTransportClosedPrefersProcessExitError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(Config{
+		LaunchArgsOverride: helperArgs(),
+		Env: helperEnv(map[string]string{
+			"CODEX_GO_TEST_SCENARIO": "transport-close-exit-error",
+		}),
+	})
+	defer func() {
+		_ = client.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.Open(ctx)
+	if err == nil {
+		t.Fatal("Open() error = nil, want TransportClosedError")
+	}
+
+	transportErr, ok := errors.AsType[*TransportClosedError](err)
+	if !ok {
+		t.Fatalf("Open() error = %T, want *TransportClosedError", err)
+	}
+	if transportErr.Cause == nil || !strings.Contains(transportErr.Cause.Error(), "exit status 23") {
+		t.Fatalf("TransportClosedError cause = %v, want exit status 23", transportErr.Cause)
+	}
+	if !strings.Contains(transportErr.StderrTail, "helper exit stderr boom") {
+		t.Fatalf("TransportClosedError stderr tail = %q, want helper exit stderr boom", transportErr.StderrTail)
+	}
+}
+
 func TestRetryOnOverload(t *testing.T) {
 	t.Parallel()
 
@@ -401,6 +464,18 @@ func TestHelperProcess(t *testing.T) {
 				_ = os.Stdout.Sync()
 				_ = os.Stderr.Sync()
 				os.Exit(0)
+			}
+			if scenario == "transport-close-delayed-stderr" {
+				_ = os.Stdout.Close()
+				time.Sleep(20 * time.Millisecond)
+				_, _ = os.Stderr.WriteString("helper delayed stderr boom\n")
+				_ = os.Stderr.Sync()
+				os.Exit(0)
+			}
+			if scenario == "transport-close-exit-error" {
+				_, _ = os.Stderr.WriteString("helper exit stderr boom\n")
+				_ = os.Stderr.Sync()
+				os.Exit(23)
 			}
 			if scenario == "initialize-duplicate" && initializeCount > 1 {
 				mustEncode(writer, map[string]any{

@@ -76,11 +76,14 @@ type Client struct {
 	clientCtx    context.Context
 	clientCancel context.CancelFunc
 
-	writeMu sync.Mutex
-	stateMu sync.RWMutex
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	waitCh  chan error
+	writeMu       sync.Mutex
+	stateMu       sync.RWMutex
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	processDone   chan struct{}
+	stderrDone    chan struct{}
+	transportDone chan struct{}
+	processErr    error
 
 	pendingMu sync.Mutex
 	pending   map[int64]chan rpcResult
@@ -90,12 +93,13 @@ type Client struct {
 	stderrMu    sync.Mutex
 	stderrLines []string
 
-	readErrMu sync.RWMutex
-	readErr   error
+	transportErrMu sync.RWMutex
+	transportErr   error
 
 	nextID atomic.Int64
 
-	closeOnce sync.Once
+	transportOnce sync.Once
+	closeOnce     sync.Once
 }
 
 type rpcEnvelope struct {
@@ -156,7 +160,6 @@ func NewClient(config Config) *Client {
 		clientCancel:  cancel,
 		pending:       make(map[int64]chan rpcResult),
 		notifications: make(chan Notification, config.NotificationBuffer),
-		waitCh:        make(chan error, 1),
 	}
 }
 
@@ -239,10 +242,13 @@ func (c *Client) Start(_ context.Context) error {
 
 	c.cmd = cmd
 	c.stdin = stdin
+	c.processDone = make(chan struct{})
+	c.stderrDone = make(chan struct{})
+	c.transportDone = make(chan struct{})
+	c.processErr = nil
+	c.transportErr = nil
 
-	go c.waitForProcess(cmd)
-	go c.readLoop(stdout)
-	go c.drainStderr(stderr)
+	go c.runTransport(cmd, stdout, stderr)
 
 	return nil
 }
@@ -270,16 +276,12 @@ func (c *Client) Close() error {
 	var closeErr error
 	c.closeOnce.Do(func() {
 		c.clientCancel()
+		c.closeStdin()
 
 		c.stateMu.RLock()
 		cmd := c.cmd
-		stdin := c.stdin
-		waitCh := c.waitCh
+		transportDone := c.transportDone
 		c.stateMu.RUnlock()
-
-		if stdin != nil {
-			_ = stdin.Close()
-		}
 
 		if cmd == nil || cmd.Process == nil {
 			return
@@ -287,13 +289,16 @@ func (c *Client) Close() error {
 
 		_ = cmd.Process.Signal(os.Interrupt)
 
-		select {
-		case err := <-waitCh:
-			closeErr = err
-		case <-time.After(2 * time.Second):
-			_ = cmd.Process.Kill()
-			closeErr = <-waitCh
+		if transportDone != nil {
+			select {
+			case <-transportDone:
+			case <-time.After(2 * time.Second):
+				_ = cmd.Process.Kill()
+				<-transportDone
+			}
 		}
+
+		closeErr = c.processExitErr()
 	})
 
 	if closeErr == nil || strings.Contains(closeErr.Error(), "signal: interrupt") {
@@ -613,24 +618,44 @@ func (c *Client) processEnv() []string {
 	return env
 }
 
-func (c *Client) waitForProcess(cmd *exec.Cmd) {
-	c.waitCh <- cmd.Wait()
-	close(c.waitCh)
+// runTransport serializes shutdown so stderr is fully drained before Wait
+// closes the child pipes.
+func (c *Client) runTransport(cmd *exec.Cmd, stdout io.Reader, stderr io.Reader) {
+	stdoutErrCh := make(chan error, 1)
+
+	go func() {
+		stdoutErrCh <- c.readLoop(stdout)
+	}()
+	go c.drainStderr(stderr)
+
+	stdoutErr := <-stdoutErrCh
+	if stdoutErr != nil && !errors.Is(stdoutErr, io.EOF) && !errors.Is(stdoutErr, os.ErrClosed) {
+		c.requestTransportStop()
+	}
+
+	c.waitForStderrDrain()
+
+	waitErr := cmd.Wait()
+	c.setProcessErr(waitErr)
+
+	c.finishTransport(&TransportClosedError{
+		Cause:      transportCause(stdoutErr, waitErr),
+		StderrTail: c.stderrTail(),
+	})
 }
 
-func (c *Client) readLoop(stdout io.Reader) {
+func (c *Client) readLoop(stdout io.Reader) error {
 	reader := bufio.NewReader(stdout)
-	defer close(c.notifications)
 
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
 			if len(bytes.TrimSpace(line)) > 0 {
-				c.handleRawLine(bytes.TrimSpace(line))
+				if dispatchErr := c.handleRawLine(bytes.TrimSpace(line)); dispatchErr != nil {
+					err = dispatchErr
+				}
 			}
-			c.failPending(c.transportClosedFrom(err))
-			c.setReadErr(c.transportClosedFrom(err))
-			return
+			return err
 		}
 
 		line = bytes.TrimSpace(line)
@@ -638,9 +663,7 @@ func (c *Client) readLoop(stdout io.Reader) {
 			continue
 		}
 		if dispatchErr := c.handleRawLine(line); dispatchErr != nil {
-			c.failPending(dispatchErr)
-			c.setReadErr(dispatchErr)
-			return
+			return dispatchErr
 		}
 	}
 }
@@ -734,6 +757,8 @@ func (c *Client) writeJSON(payload any) error {
 }
 
 func (c *Client) drainStderr(stderr io.Reader) {
+	defer c.markStderrDone()
+
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -793,33 +818,157 @@ func (c *Client) failPending(err error) {
 	}
 }
 
-func (c *Client) setReadErr(err error) {
-	c.readErrMu.Lock()
-	defer c.readErrMu.Unlock()
-	if c.readErr == nil {
-		c.readErr = err
-	}
+func (c *Client) finishTransport(finalErr error) {
+	c.transportOnce.Do(func() {
+		c.clientCancel()
+		c.closeStdin()
+		c.setTransportErr(finalErr)
+		c.failPending(finalErr)
+		close(c.notifications)
+
+		c.stateMu.RLock()
+		transportDone := c.transportDone
+		c.stateMu.RUnlock()
+		if transportDone != nil {
+			close(transportDone)
+		}
+	})
 }
 
 func (c *Client) transportClosed() error {
-	c.readErrMu.RLock()
-	defer c.readErrMu.RUnlock()
-	if c.readErr != nil {
-		return c.readErr
+	if err := c.getTransportErr(); err != nil {
+		return err
 	}
+
+	c.stateMu.RLock()
+	transportDone := c.transportDone
+	c.stateMu.RUnlock()
+	if transportDone != nil {
+		<-transportDone
+	}
+	if err := c.getTransportErr(); err != nil {
+		return err
+	}
+
 	return &TransportClosedError{StderrTail: c.stderrTail()}
 }
 
 func (c *Client) transportClosedFrom(cause error) error {
-	tail := c.stderrTail()
-	for attempt := 0; tail == "" && attempt < 5; attempt++ {
-		time.Sleep(10 * time.Millisecond)
-		tail = c.stderrTail()
+	if err := c.getTransportErr(); err != nil {
+		return err
 	}
+
+	c.waitForTransportDone()
+	if err := c.getTransportErr(); err != nil {
+		return err
+	}
+
 	return &TransportClosedError{
 		Cause:      cause,
-		StderrTail: tail,
+		StderrTail: c.stderrTail(),
 	}
+}
+
+func (c *Client) closeStdin() {
+	c.stateMu.Lock()
+	stdin := c.stdin
+	c.stdin = nil
+	c.stateMu.Unlock()
+
+	if stdin != nil {
+		_ = stdin.Close()
+	}
+}
+
+func (c *Client) requestTransportStop() {
+	c.closeStdin()
+
+	c.stateMu.RLock()
+	cmd := c.cmd
+	c.stateMu.RUnlock()
+
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Signal(os.Interrupt)
+	}
+}
+
+func (c *Client) markStderrDone() {
+	c.stateMu.RLock()
+	stderrDone := c.stderrDone
+	c.stateMu.RUnlock()
+
+	if stderrDone != nil {
+		close(stderrDone)
+	}
+}
+
+func (c *Client) waitForStderrDrain() {
+	c.stateMu.RLock()
+	stderrDone := c.stderrDone
+	c.stateMu.RUnlock()
+
+	if stderrDone != nil {
+		<-stderrDone
+	}
+}
+
+func (c *Client) waitForTransportDone() {
+	c.stateMu.RLock()
+	transportDone := c.transportDone
+	c.stateMu.RUnlock()
+
+	if transportDone != nil {
+		<-transportDone
+	}
+}
+
+func (c *Client) processExitErr() error {
+	c.stateMu.RLock()
+	processDone := c.processDone
+	c.stateMu.RUnlock()
+
+	if processDone != nil {
+		<-processDone
+	}
+
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.processErr
+}
+
+func (c *Client) setTransportErr(err error) {
+	c.transportErrMu.Lock()
+	defer c.transportErrMu.Unlock()
+	if c.transportErr == nil {
+		c.transportErr = err
+	}
+}
+
+func (c *Client) getTransportErr() error {
+	c.transportErrMu.RLock()
+	defer c.transportErrMu.RUnlock()
+	return c.transportErr
+}
+
+func (c *Client) setProcessErr(err error) {
+	c.stateMu.Lock()
+	c.processErr = err
+	processDone := c.processDone
+	c.stateMu.Unlock()
+
+	if processDone != nil {
+		close(processDone)
+	}
+}
+
+func transportCause(cause error, processErr error) error {
+	if cause == nil {
+		return processErr
+	}
+	if processErr != nil && (errors.Is(cause, io.EOF) || errors.Is(cause, io.ErrClosedPipe) || errors.Is(cause, os.ErrClosed)) {
+		return processErr
+	}
+	return cause
 }
 
 func decodeKnownPayload(
