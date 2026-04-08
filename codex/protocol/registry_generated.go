@@ -33,6 +33,9 @@ var NotificationFactories = map[string]NotificationFactory{
 	"error": func() any {
 		return &ErrorNotification{}
 	},
+	"fs/changed": func() any {
+		return &FsChangedNotification{}
+	},
 	"fuzzyFileSearch/sessionCompleted": func() any {
 		return &FuzzyFileSearchSessionCompletedNotification{}
 	},
@@ -87,6 +90,9 @@ var NotificationFactories = map[string]NotificationFactory{
 	"mcpServer/oauthLogin/completed": func() any {
 		return &McpServerOauthLoginCompletedNotification{}
 	},
+	"mcpServer/startupStatus/updated": func() any {
+		return &McpServerStatusUpdatedNotification{}
+	},
 	"model/rerouted": func() any {
 		return &ModelReroutedNotification{}
 	},
@@ -122,6 +128,9 @@ var NotificationFactories = map[string]NotificationFactory{
 	},
 	"thread/realtime/started": func() any {
 		return &ThreadRealtimeStartedNotification{}
+	},
+	"thread/realtime/transcriptUpdated": func() any {
+		return &ThreadRealtimeTranscriptUpdatedNotification{}
 	},
 	"thread/started": func() any {
 		return &ThreadStartedNotification{}

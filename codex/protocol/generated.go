@@ -37,6 +37,8 @@ type AgentMessageDeltaNotification struct {
 	TurnId   string `json:"turnId"`
 }
 
+type AgentPath string
+
 type AppBranding struct {
 	Category          *string `json:"category,omitempty"`
 	Developer         *string `json:"developer,omitempty"`
@@ -235,6 +237,10 @@ type ClientInfo struct {
 	Version string  `json:"version"`
 }
 
+type CodexErrorInfoActiveTurnNotSteerable struct {
+	TurnKind NonSteerableTurnKind `json:"turnKind"`
+}
+
 type CodexErrorInfoHttpConnectionFailed struct {
 	HttpStatusCode *uint16 `json:"httpStatusCode,omitempty"`
 }
@@ -287,6 +293,7 @@ func (v CodexErrorInfoKind) IsValid() bool {
 
 type CodexErrorInfo struct {
 	Kind                           CodexErrorInfoKind                            `json:"-"`
+	ActiveTurnNotSteerable         *CodexErrorInfoActiveTurnNotSteerable         `json:"-"`
 	HttpConnectionFailed           *CodexErrorInfoHttpConnectionFailed           `json:"-"`
 	ResponseStreamConnectionFailed *CodexErrorInfoResponseStreamConnectionFailed `json:"-"`
 	ResponseStreamDisconnected     *CodexErrorInfoResponseStreamDisconnected     `json:"-"`
@@ -295,6 +302,7 @@ type CodexErrorInfo struct {
 
 func (v CodexErrorInfo) MarshalJSON() ([]byte, error) {
 	return marshalStringOrSingleFieldObjectUnion(v.Kind,
+		objectUnionField{name: "activeTurnNotSteerable", value: v.ActiveTurnNotSteerable},
 		objectUnionField{name: "httpConnectionFailed", value: v.HttpConnectionFailed},
 		objectUnionField{name: "responseStreamConnectionFailed", value: v.ResponseStreamConnectionFailed},
 		objectUnionField{name: "responseStreamDisconnected", value: v.ResponseStreamDisconnected},
@@ -305,6 +313,14 @@ func (v CodexErrorInfo) MarshalJSON() ([]byte, error) {
 func (v *CodexErrorInfo) UnmarshalJSON(data []byte) error {
 	*v = CodexErrorInfo{}
 	kind, err := unmarshalStringOrSingleFieldObjectUnion[CodexErrorInfoKind](data, codexErrorInfoKindValues, map[string]func(json.RawMessage) error{
+		"activeTurnNotSteerable": func(raw json.RawMessage) error {
+			var payload CodexErrorInfoActiveTurnNotSteerable
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			v.ActiveTurnNotSteerable = &payload
+			return nil
+		},
 		"httpConnectionFailed": func(raw json.RawMessage) error {
 			var payload CodexErrorInfoHttpConnectionFailed
 			if err := json.Unmarshal(raw, &payload); err != nil {
@@ -508,6 +524,30 @@ type CommandExecutionRequestApprovalParams struct {
 	TurnId                          string                   `json:"turnId"`
 }
 
+type CommandExecutionSource string
+
+const (
+	CommandExecutionSourceAgent                  CommandExecutionSource = "agent"
+	CommandExecutionSourceUserShell              CommandExecutionSource = "userShell"
+	CommandExecutionSourceUnifiedExecStartup     CommandExecutionSource = "unifiedExecStartup"
+	CommandExecutionSourceUnifiedExecInteraction CommandExecutionSource = "unifiedExecInteraction"
+)
+
+var commandExecutionSourceValues = map[string]CommandExecutionSource{
+	"agent":                  CommandExecutionSourceAgent,
+	"userShell":              CommandExecutionSourceUserShell,
+	"unifiedExecStartup":     CommandExecutionSourceUnifiedExecStartup,
+	"unifiedExecInteraction": CommandExecutionSourceUnifiedExecInteraction,
+}
+
+func ParseCommandExecutionSource(value string) (CommandExecutionSource, bool) {
+	return parseStringEnum[CommandExecutionSource](value, commandExecutionSourceValues)
+}
+
+func (v CommandExecutionSource) IsValid() bool {
+	return isValidStringEnum(v, commandExecutionSourceValues)
+}
+
 type CommandExecutionStatus string
 
 const (
@@ -678,12 +718,38 @@ type FileUpdateChange struct {
 	Path string          `json:"path"`
 }
 
+type FsChangedNotification struct {
+	ChangedPaths []AbsolutePathBuf `json:"changedPaths"`
+	WatchId      string            `json:"watchId"`
+}
+
+type FuzzyFileSearchMatchType string
+
+const (
+	FuzzyFileSearchMatchTypeFile      FuzzyFileSearchMatchType = "file"
+	FuzzyFileSearchMatchTypeDirectory FuzzyFileSearchMatchType = "directory"
+)
+
+var fuzzyFileSearchMatchTypeValues = map[string]FuzzyFileSearchMatchType{
+	"file":      FuzzyFileSearchMatchTypeFile,
+	"directory": FuzzyFileSearchMatchTypeDirectory,
+}
+
+func ParseFuzzyFileSearchMatchType(value string) (FuzzyFileSearchMatchType, bool) {
+	return parseStringEnum[FuzzyFileSearchMatchType](value, fuzzyFileSearchMatchTypeValues)
+}
+
+func (v FuzzyFileSearchMatchType) IsValid() bool {
+	return isValidStringEnum(v, fuzzyFileSearchMatchTypeValues)
+}
+
 type FuzzyFileSearchResult struct {
-	FileName string   `json:"file_name"`
-	Indices  []uint32 `json:"indices,omitempty"`
-	Path     string   `json:"path"`
-	Root     string   `json:"root"`
-	Score    uint32   `json:"score"`
+	FileName  string                   `json:"file_name"`
+	Indices   []uint32                 `json:"indices,omitempty"`
+	MatchType FuzzyFileSearchMatchType `json:"match_type"`
+	Path      string                   `json:"path"`
+	Root      string                   `json:"root"`
+	Score     uint32                   `json:"score"`
 }
 
 type FuzzyFileSearchSessionCompletedNotification struct {
@@ -764,12 +830,16 @@ type HookCompletedNotification struct {
 type HookEventName string
 
 const (
+	HookEventNamePreToolUse       HookEventName = "preToolUse"
+	HookEventNamePostToolUse      HookEventName = "postToolUse"
 	HookEventNameSessionStart     HookEventName = "sessionStart"
 	HookEventNameUserPromptSubmit HookEventName = "userPromptSubmit"
 	HookEventNameStop             HookEventName = "stop"
 )
 
 var hookEventNameValues = map[string]HookEventName{
+	"preToolUse":       HookEventNamePreToolUse,
+	"postToolUse":      HookEventNamePostToolUse,
 	"sessionStart":     HookEventNameSessionStart,
 	"userPromptSubmit": HookEventNameUserPromptSubmit,
 	"stop":             HookEventNameStop,
@@ -856,6 +926,11 @@ func (v HookOutputEntryKind) IsValid() bool {
 	return isValidStringEnum(v, hookOutputEntryKindValues)
 }
 
+type HookPromptFragment struct {
+	HookRunId string `json:"hookRunId"`
+	Text      string `json:"text"`
+}
+
 type HookRunStatus string
 
 const (
@@ -935,9 +1010,10 @@ type InitializeParams struct {
 }
 
 type InitializeResponse struct {
-	PlatformFamily string `json:"platformFamily"`
-	PlatformOs     string `json:"platformOs"`
-	UserAgent      string `json:"userAgent"`
+	CodexHome      V2AbsolutePathBuf `json:"codexHome"`
+	PlatformFamily string            `json:"platformFamily"`
+	PlatformOs     string            `json:"platformOs"`
+	UserAgent      string            `json:"userAgent"`
 }
 
 type InputModality string
@@ -1208,6 +1284,36 @@ type McpServerOauthLoginCompletedNotification struct {
 	Success bool    `json:"success"`
 }
 
+type McpServerStartupState string
+
+const (
+	McpServerStartupStateStarting  McpServerStartupState = "starting"
+	McpServerStartupStateReady     McpServerStartupState = "ready"
+	McpServerStartupStateFailed    McpServerStartupState = "failed"
+	McpServerStartupStateCancelled McpServerStartupState = "cancelled"
+)
+
+var mcpServerStartupStateValues = map[string]McpServerStartupState{
+	"starting":  McpServerStartupStateStarting,
+	"ready":     McpServerStartupStateReady,
+	"failed":    McpServerStartupStateFailed,
+	"cancelled": McpServerStartupStateCancelled,
+}
+
+func ParseMcpServerStartupState(value string) (McpServerStartupState, bool) {
+	return parseStringEnum[McpServerStartupState](value, mcpServerStartupStateValues)
+}
+
+func (v McpServerStartupState) IsValid() bool {
+	return isValidStringEnum(v, mcpServerStartupStateValues)
+}
+
+type McpServerStatusUpdatedNotification struct {
+	Error  *string               `json:"error,omitempty"`
+	Name   string                `json:"name"`
+	Status McpServerStartupState `json:"status"`
+}
+
 type McpToolCallError struct {
 	Message string `json:"message"`
 }
@@ -1414,6 +1520,26 @@ func (v NetworkPolicyRuleAction) IsValid() bool {
 	return isValidStringEnum(v, networkPolicyRuleActionValues)
 }
 
+type NonSteerableTurnKind string
+
+const (
+	NonSteerableTurnKindReview  NonSteerableTurnKind = "review"
+	NonSteerableTurnKindCompact NonSteerableTurnKind = "compact"
+)
+
+var nonSteerableTurnKindValues = map[string]NonSteerableTurnKind{
+	"review":  NonSteerableTurnKindReview,
+	"compact": NonSteerableTurnKindCompact,
+}
+
+func ParseNonSteerableTurnKind(value string) (NonSteerableTurnKind, bool) {
+	return parseStringEnum[NonSteerableTurnKind](value, nonSteerableTurnKindValues)
+}
+
+func (v NonSteerableTurnKind) IsValid() bool {
+	return isValidStringEnum(v, nonSteerableTurnKindValues)
+}
+
 type ParsedCommandType string
 
 const (
@@ -1537,27 +1663,31 @@ type PlanDeltaNotification struct {
 type PlanType string
 
 const (
-	PlanTypeFree       PlanType = "free"
-	PlanTypeGo         PlanType = "go"
-	PlanTypePlus       PlanType = "plus"
-	PlanTypePro        PlanType = "pro"
-	PlanTypeTeam       PlanType = "team"
-	PlanTypeBusiness   PlanType = "business"
-	PlanTypeEnterprise PlanType = "enterprise"
-	PlanTypeEdu        PlanType = "edu"
-	PlanTypeUnknown    PlanType = "unknown"
+	PlanTypeFree                        PlanType = "free"
+	PlanTypeGo                          PlanType = "go"
+	PlanTypePlus                        PlanType = "plus"
+	PlanTypePro                         PlanType = "pro"
+	PlanTypeTeam                        PlanType = "team"
+	PlanTypeSelfServeBusinessUsageBased PlanType = "self_serve_business_usage_based"
+	PlanTypeBusiness                    PlanType = "business"
+	PlanTypeEnterpriseCbpUsageBased     PlanType = "enterprise_cbp_usage_based"
+	PlanTypeEnterprise                  PlanType = "enterprise"
+	PlanTypeEdu                         PlanType = "edu"
+	PlanTypeUnknown                     PlanType = "unknown"
 )
 
 var planTypeValues = map[string]PlanType{
-	"free":       PlanTypeFree,
-	"go":         PlanTypeGo,
-	"plus":       PlanTypePlus,
-	"pro":        PlanTypePro,
-	"team":       PlanTypeTeam,
-	"business":   PlanTypeBusiness,
-	"enterprise": PlanTypeEnterprise,
-	"edu":        PlanTypeEdu,
-	"unknown":    PlanTypeUnknown,
+	"free":                            PlanTypeFree,
+	"go":                              PlanTypeGo,
+	"plus":                            PlanTypePlus,
+	"pro":                             PlanTypePro,
+	"team":                            PlanTypeTeam,
+	"self_serve_business_usage_based": PlanTypeSelfServeBusinessUsageBased,
+	"business":                        PlanTypeBusiness,
+	"enterprise_cbp_usage_based":      PlanTypeEnterpriseCbpUsageBased,
+	"enterprise":                      PlanTypeEnterprise,
+	"edu":                             PlanTypeEdu,
+	"unknown":                         PlanTypeUnknown,
 }
 
 func ParsePlanType(value string) (PlanType, bool) {
@@ -1838,10 +1968,11 @@ func (v *SessionSource) UnmarshalJSON(data []byte) error {
 type SkillsChangedNotification map[string]any
 
 type SubAgentSourceThreadSpawn struct {
-	AgentNickname  *string  `json:"agent_nickname,omitempty"`
-	AgentRole      *string  `json:"agent_role,omitempty"`
-	Depth          int32    `json:"depth"`
-	ParentThreadID ThreadId `json:"parent_thread_id"`
+	AgentNickname  *string    `json:"agent_nickname,omitempty"`
+	AgentPath      *AgentPath `json:"agent_path,omitempty"`
+	AgentRole      *string    `json:"agent_role,omitempty"`
+	Depth          int32      `json:"depth"`
+	ParentThreadID ThreadId   `json:"parent_thread_id"`
 }
 
 type SubAgentSourceKind string
@@ -2083,6 +2214,12 @@ type ThreadRealtimeStartedNotification struct {
 	Version   RealtimeConversationVersion `json:"version"`
 }
 
+type ThreadRealtimeTranscriptUpdatedNotification struct {
+	Role     string `json:"role"`
+	Text     string `json:"text"`
+	ThreadId string `json:"threadId"`
+}
+
 type ThreadResumeParams struct {
 	ApprovalPolicy        *AskForApproval    `json:"approvalPolicy,omitempty"`
 	ApprovalsReviewer     *ApprovalsReviewer `json:"approvalsReviewer,omitempty"`
@@ -2144,7 +2281,6 @@ const (
 	ThreadSourceKindVscode              ThreadSourceKind = "vscode"
 	ThreadSourceKindExec                ThreadSourceKind = "exec"
 	ThreadSourceKindAppServer           ThreadSourceKind = "appServer"
-	ThreadSourceKindCustom              ThreadSourceKind = "custom"
 	ThreadSourceKindSubAgent            ThreadSourceKind = "subAgent"
 	ThreadSourceKindSubAgentReview      ThreadSourceKind = "subAgentReview"
 	ThreadSourceKindSubAgentCompact     ThreadSourceKind = "subAgentCompact"
@@ -2158,7 +2294,6 @@ var threadSourceKindValues = map[string]ThreadSourceKind{
 	"vscode":              ThreadSourceKindVscode,
 	"exec":                ThreadSourceKindExec,
 	"appServer":           ThreadSourceKindAppServer,
-	"custom":              ThreadSourceKindCustom,
 	"subAgent":            ThreadSourceKindSubAgent,
 	"subAgentReview":      ThreadSourceKindSubAgentReview,
 	"subAgentCompact":     ThreadSourceKindSubAgentCompact,

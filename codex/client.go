@@ -22,7 +22,6 @@ import (
 const (
 	defaultClientName         = "codex_go_sdk"
 	defaultClientTitle        = "Codex Go SDK"
-	defaultClientVersion      = "0.1.0"
 	defaultNotificationBuffer = 64
 	defaultStderrTailLines    = 400
 )
@@ -136,7 +135,7 @@ func NewClient(config Config) *Client {
 		config.ClientTitle = defaultClientTitle
 	}
 	if config.ClientVersion == "" {
-		config.ClientVersion = defaultClientVersion
+		config.ClientVersion = Version
 	}
 	if config.NotificationBuffer <= 0 {
 		config.NotificationBuffer = defaultNotificationBuffer

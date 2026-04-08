@@ -41,6 +41,18 @@ func TestOpenAndCoreRPCMethods(t *testing.T) {
 	if initResp.UserAgent != "codex/test" {
 		t.Fatalf("Open() user agent = %q, want %q", initResp.UserAgent, "codex/test")
 	}
+	waitForLogEntry(t, logPath, func(entry map[string]any) bool {
+		method, _ := entry["method"].(string)
+		return method == "initialize"
+	})
+	params := logParamsForMethod(t, readLogLines(t, logPath), "initialize")
+	clientInfo, ok := params["clientInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize clientInfo type = %T, want map[string]any", params["clientInfo"])
+	}
+	if got, _ := clientInfo["version"].(string); got != Version {
+		t.Fatalf("initialize clientInfo.version = %q, want %q", got, Version)
+	}
 
 	started, err := client.ThreadStart(ctx, &protocol.ThreadStartParams{
 		Model: new("gpt-5"),

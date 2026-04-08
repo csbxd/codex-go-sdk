@@ -199,7 +199,7 @@ cd /path/to/codex-go-sdk
 go run ./cmd/updatesdkartifacts generate-types
 ```
 
-By default the generator downloads schema inputs from `openai/codex` on the `main` branch at runtime. Optional overrides:
+By default the generator downloads schema inputs from the `openai/codex` tag that matches `codex.Version` (`rust-v0.118.0` today). Optional overrides:
 
 - `CODEX_GO_SCHEMA_REF=<git-ref>`
 - `CODEX_GO_SCHEMA_REPO=<owner/repo>`
