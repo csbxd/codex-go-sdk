@@ -720,7 +720,8 @@ func readLogLines(t *testing.T, logPath string) [][]byte {
 	}
 	rawLines := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
 	lines := make([][]byte, 0, len(rawLines))
-	for _, line := range rawLines {
+	for i := range rawLines {
+		line := rawLines[i]
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 {
 			lines = append(lines, append([]byte(nil), line...))
@@ -732,7 +733,8 @@ func readLogLines(t *testing.T, logPath string) [][]byte {
 func logMethods(t *testing.T, lines [][]byte) []string {
 	t.Helper()
 	var methods []string
-	for _, line := range lines {
+	for i := range lines {
+		line := lines[i]
 		var entry map[string]any
 		if err := json.Unmarshal(line, &entry); err != nil {
 			t.Fatalf("json.Unmarshal(log line) error = %v", err)
@@ -747,7 +749,8 @@ func logMethods(t *testing.T, lines [][]byte) []string {
 
 func logParamsForMethod(t *testing.T, lines [][]byte, method string) map[string]any {
 	t.Helper()
-	for _, line := range lines {
+	for i := range lines {
+		line := lines[i]
 		var entry map[string]any
 		if err := json.Unmarshal(line, &entry); err != nil {
 			t.Fatalf("json.Unmarshal(log line) error = %v", err)
@@ -767,7 +770,8 @@ func waitForLogEntry(t *testing.T, logPath string, match func(map[string]any) bo
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(logPath); err == nil {
 			lines := readLogLines(t, logPath)
-			for _, line := range lines {
+			for i := range lines {
+				line := lines[i]
 				var entry map[string]any
 				if err := json.Unmarshal(line, &entry); err != nil {
 					t.Fatalf("json.Unmarshal(log line) error = %v", err)

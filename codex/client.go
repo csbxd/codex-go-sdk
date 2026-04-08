@@ -76,12 +76,8 @@ type Client struct {
 	clientCtx    context.Context
 	clientCancel context.CancelFunc
 
-	writeMu       sync.Mutex
-	stateMu       sync.RWMutex
 	cmd           *exec.Cmd
 	stdin         io.WriteCloser
-	processDone   chan struct{}
-	stderrDone    chan struct{}
 	transportDone chan struct{}
 	processErr    error
 
@@ -93,8 +89,7 @@ type Client struct {
 	stderrMu    sync.Mutex
 	stderrLines []string
 
-	transportErrMu sync.RWMutex
-	transportErr   error
+	transportErr error
 
 	nextID atomic.Int64
 
@@ -160,6 +155,7 @@ func NewClient(config Config) *Client {
 		clientCancel:  cancel,
 		pending:       make(map[int64]chan rpcResult),
 		notifications: make(chan Notification, config.NotificationBuffer),
+		transportDone: make(chan struct{}),
 	}
 }
 
@@ -205,9 +201,6 @@ func TextInput(text string) []protocol.UserInput {
 
 // Start launches the configured codex app-server process.
 func (c *Client) Start(_ context.Context) error {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-
 	if c.cmd != nil {
 		return nil
 	}
@@ -242,9 +235,6 @@ func (c *Client) Start(_ context.Context) error {
 
 	c.cmd = cmd
 	c.stdin = stdin
-	c.processDone = make(chan struct{})
-	c.stderrDone = make(chan struct{})
-	c.transportDone = make(chan struct{})
 	c.processErr = nil
 	c.transportErr = nil
 
@@ -278,10 +268,7 @@ func (c *Client) Close() error {
 		c.clientCancel()
 		c.closeStdin()
 
-		c.stateMu.RLock()
 		cmd := c.cmd
-		transportDone := c.transportDone
-		c.stateMu.RUnlock()
 
 		if cmd == nil || cmd.Process == nil {
 			return
@@ -289,294 +276,20 @@ func (c *Client) Close() error {
 
 		_ = cmd.Process.Signal(os.Interrupt)
 
-		if transportDone != nil {
-			select {
-			case <-transportDone:
-			case <-time.After(2 * time.Second):
-				_ = cmd.Process.Kill()
-				<-transportDone
-			}
+		select {
+		case <-c.transportDone:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-c.transportDone
 		}
 
-		closeErr = c.processExitErr()
+		closeErr = c.processErr
 	})
 
 	if closeErr == nil || strings.Contains(closeErr.Error(), "signal: interrupt") {
 		return nil
 	}
 	return closeErr
-}
-
-// Initialize performs the required initialize request followed by the
-// initialized notification.
-func (c *Client) Initialize(ctx context.Context) (protocol.InitializeResponse, error) {
-	params := protocol.InitializeParams{
-		ClientInfo: protocol.ClientInfo{
-			Name:    c.config.ClientName,
-			Title:   new(c.config.ClientTitle),
-			Version: c.config.ClientVersion,
-		},
-		Capabilities: &protocol.InitializeCapabilities{
-			ExperimentalApi: new(c.config.ExperimentalAPI),
-		},
-	}
-
-	var resp protocol.InitializeResponse
-	if err := c.Request(ctx, "initialize", params, &resp); err != nil {
-		return protocol.InitializeResponse{}, err
-	}
-	if err := c.Notify("initialized", map[string]any{}); err != nil {
-		return protocol.InitializeResponse{}, err
-	}
-
-	return resp, nil
-}
-
-// Notify writes a JSON-RPC notification to codex app-server.
-func (c *Client) Notify(method string, params any) error {
-	if params == nil {
-		params = map[string]any{}
-	}
-	return c.writeJSON(rpcNotification{
-		Method: method,
-		Params: params,
-	})
-}
-
-// Request sends a JSON-RPC request and decodes the result into out.
-func (c *Client) Request(ctx context.Context, method string, params any, out any) error {
-	if params == nil {
-		params = map[string]any{}
-	}
-
-	requestID := c.nextID.Add(1)
-	resultCh := make(chan rpcResult, 1)
-	c.registerPending(requestID, resultCh)
-	defer c.unregisterPending(requestID)
-
-	if err := c.writeJSON(rpcRequest{
-		ID:     requestID,
-		Method: method,
-		Params: params,
-	}); err != nil {
-		return err
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case result := <-resultCh:
-		if result.err != nil {
-			return result.err
-		}
-		if out == nil || len(result.result) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(result.result, out); err != nil {
-			return &DecodeError{
-				Method:  method,
-				Payload: append(json.RawMessage(nil), result.result...),
-				Cause:   err,
-			}
-		}
-		return nil
-	}
-}
-
-// Call decodes a JSON-RPC result into T.
-func Call[T any](ctx context.Context, client *Client, method string, params any) (T, error) {
-	var out T
-	err := client.Request(ctx, method, params, &out)
-	return out, err
-}
-
-// NextNotification waits for the next server notification.
-func (c *Client) NextNotification(ctx context.Context) (Notification, error) {
-	select {
-	case <-ctx.Done():
-		return Notification{}, ctx.Err()
-	case notification, ok := <-c.notifications:
-		if !ok {
-			return Notification{}, c.transportClosed()
-		}
-		return notification, nil
-	}
-}
-
-// WaitForTurnCompleted reads notifications until the specified turn completes.
-func (c *Client) WaitForTurnCompleted(
-	ctx context.Context,
-	turnID string,
-) (*protocol.TurnCompletedNotification, error) {
-	for {
-		notification, err := c.NextNotification(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		payload, ok := notification.Payload.(*protocol.TurnCompletedNotification)
-		if ok && payload.Turn.ID == turnID {
-			return payload, nil
-		}
-	}
-}
-
-// StreamUntilMethods collects notifications until one of the target methods
-// arrives.
-func (c *Client) StreamUntilMethods(
-	ctx context.Context,
-	methods ...string,
-) ([]Notification, error) {
-	targets := make(map[string]struct{}, len(methods))
-	for _, method := range methods {
-		targets[method] = struct{}{}
-	}
-
-	var out []Notification
-	for {
-		notification, err := c.NextNotification(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, notification)
-		if _, ok := targets[notification.Method]; ok {
-			return out, nil
-		}
-	}
-}
-
-// ThreadStart invokes thread/start.
-func (c *Client) ThreadStart(
-	ctx context.Context,
-	params *protocol.ThreadStartParams,
-) (protocol.ThreadStartResponse, error) {
-	return Call[protocol.ThreadStartResponse](ctx, c, "thread/start", valueOrEmpty(params))
-}
-
-// ThreadResume invokes thread/resume.
-func (c *Client) ThreadResume(
-	ctx context.Context,
-	params *protocol.ThreadResumeParams,
-) (protocol.ThreadResumeResponse, error) {
-	return Call[protocol.ThreadResumeResponse](ctx, c, "thread/resume", mustValue(params))
-}
-
-// ThreadList invokes thread/list.
-func (c *Client) ThreadList(
-	ctx context.Context,
-	params *protocol.ThreadListParams,
-) (protocol.ThreadListResponse, error) {
-	return Call[protocol.ThreadListResponse](ctx, c, "thread/list", valueOrEmpty(params))
-}
-
-// ThreadRead invokes thread/read.
-func (c *Client) ThreadRead(
-	ctx context.Context,
-	params *protocol.ThreadReadParams,
-) (protocol.ThreadReadResponse, error) {
-	return Call[protocol.ThreadReadResponse](ctx, c, "thread/read", mustValue(params))
-}
-
-// ThreadFork invokes thread/fork.
-func (c *Client) ThreadFork(
-	ctx context.Context,
-	params *protocol.ThreadForkParams,
-) (protocol.ThreadForkResponse, error) {
-	return Call[protocol.ThreadForkResponse](ctx, c, "thread/fork", mustValue(params))
-}
-
-// ThreadArchive invokes thread/archive.
-func (c *Client) ThreadArchive(
-	ctx context.Context,
-	params *protocol.ThreadArchiveParams,
-) (protocol.ThreadArchiveResponse, error) {
-	return Call[protocol.ThreadArchiveResponse](ctx, c, "thread/archive", mustValue(params))
-}
-
-// ThreadUnarchive invokes thread/unarchive.
-func (c *Client) ThreadUnarchive(
-	ctx context.Context,
-	params *protocol.ThreadUnarchiveParams,
-) (protocol.ThreadUnarchiveResponse, error) {
-	return Call[protocol.ThreadUnarchiveResponse](ctx, c, "thread/unarchive", mustValue(params))
-}
-
-// ThreadSetName invokes thread/name/set.
-func (c *Client) ThreadSetName(
-	ctx context.Context,
-	params *protocol.ThreadSetNameParams,
-) (protocol.ThreadSetNameResponse, error) {
-	return Call[protocol.ThreadSetNameResponse](ctx, c, "thread/name/set", mustValue(params))
-}
-
-// ThreadCompact invokes thread/compact/start.
-func (c *Client) ThreadCompact(
-	ctx context.Context,
-	params *protocol.ThreadCompactStartParams,
-) (protocol.ThreadCompactStartResponse, error) {
-	return Call[protocol.ThreadCompactStartResponse](ctx, c, "thread/compact/start", mustValue(params))
-}
-
-// TurnStart invokes turn/start.
-func (c *Client) TurnStart(
-	ctx context.Context,
-	params *protocol.TurnStartParams,
-) (protocol.TurnStartResponse, error) {
-	return Call[protocol.TurnStartResponse](ctx, c, "turn/start", mustValue(params))
-}
-
-// TurnStartText invokes turn/start with a single text input item.
-func (c *Client) TurnStartText(
-	ctx context.Context,
-	threadID string,
-	text string,
-	params *protocol.TurnStartParams,
-) (protocol.TurnStartResponse, error) {
-	cloned := protocol.TurnStartParams{}
-	if params != nil {
-		cloned = *params
-	}
-	cloned.ThreadId = threadID
-	cloned.Input = TextInput(text)
-	return c.TurnStart(ctx, &cloned)
-}
-
-// TurnInterrupt invokes turn/interrupt.
-func (c *Client) TurnInterrupt(
-	ctx context.Context,
-	params *protocol.TurnInterruptParams,
-) (protocol.TurnInterruptResponse, error) {
-	return Call[protocol.TurnInterruptResponse](ctx, c, "turn/interrupt", mustValue(params))
-}
-
-// TurnSteer invokes turn/steer.
-func (c *Client) TurnSteer(
-	ctx context.Context,
-	params *protocol.TurnSteerParams,
-) (protocol.TurnSteerResponse, error) {
-	return Call[protocol.TurnSteerResponse](ctx, c, "turn/steer", mustValue(params))
-}
-
-// TurnSteerText invokes turn/steer with a single text input item.
-func (c *Client) TurnSteerText(
-	ctx context.Context,
-	threadID string,
-	expectedTurnID string,
-	text string,
-) (protocol.TurnSteerResponse, error) {
-	return c.TurnSteer(ctx, &protocol.TurnSteerParams{
-		ThreadId:       threadID,
-		ExpectedTurnId: expectedTurnID,
-		Input:          TextInput(text),
-	})
-}
-
-// ModelList invokes model/list.
-func (c *Client) ModelList(
-	ctx context.Context,
-	params *protocol.ModelListParams,
-) (protocol.ModelListResponse, error) {
-	return Call[protocol.ModelListResponse](ctx, c, "model/list", valueOrEmpty(params))
 }
 
 func (c *Client) launchArgs() ([]string, error) {
@@ -594,7 +307,8 @@ func (c *Client) launchArgs() ([]string, error) {
 	}
 
 	args := []string{bin}
-	for _, override := range c.config.ConfigOverrides {
+	for i := range c.config.ConfigOverrides {
+		override := c.config.ConfigOverrides[i]
 		args = append(args, "--config", override)
 	}
 	args = append(args, "app-server", "--listen", "stdio://")
@@ -603,7 +317,9 @@ func (c *Client) launchArgs() ([]string, error) {
 
 func (c *Client) processEnv() []string {
 	envMap := make(map[string]string)
-	for _, entry := range os.Environ() {
+	environ := os.Environ()
+	for i := range environ {
+		entry := environ[i]
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
 			envMap[key] = value
@@ -622,21 +338,22 @@ func (c *Client) processEnv() []string {
 // closes the child pipes.
 func (c *Client) runTransport(cmd *exec.Cmd, stdout io.Reader, stderr io.Reader) {
 	stdoutErrCh := make(chan error, 1)
+	stderrDone := make(chan struct{})
 
 	go func() {
 		stdoutErrCh <- c.readLoop(stdout)
 	}()
-	go c.drainStderr(stderr)
+	go c.drainStderr(stderr, stderrDone)
 
 	stdoutErr := <-stdoutErrCh
 	if stdoutErr != nil && !errors.Is(stdoutErr, io.EOF) && !errors.Is(stdoutErr, os.ErrClosed) {
 		c.requestTransportStop()
 	}
 
-	c.waitForStderrDrain()
+	<-stderrDone
 
 	waitErr := cmd.Wait()
-	c.setProcessErr(waitErr)
+	c.processErr = waitErr
 
 	c.finishTransport(&TransportClosedError{
 		Cause:      transportCause(stdoutErr, waitErr),
@@ -734,9 +451,7 @@ func (c *Client) handleServerRequest(id int64, method string, params json.RawMes
 }
 
 func (c *Client) writeJSON(payload any) error {
-	c.stateMu.RLock()
 	stdin := c.stdin
-	c.stateMu.RUnlock()
 
 	if stdin == nil {
 		return c.transportClosed()
@@ -747,17 +462,14 @@ func (c *Client) writeJSON(payload any) error {
 		return err
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-
 	if _, err := stdin.Write(append(bytes, '\n')); err != nil {
 		return c.transportClosedFrom(err)
 	}
 	return nil
 }
 
-func (c *Client) drainStderr(stderr io.Reader) {
-	defer c.markStderrDone()
+func (c *Client) drainStderr(stderr io.Reader, done chan<- struct{}) {
+	defer close(done)
 
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -822,45 +534,37 @@ func (c *Client) finishTransport(finalErr error) {
 	c.transportOnce.Do(func() {
 		c.clientCancel()
 		c.closeStdin()
-		c.setTransportErr(finalErr)
+		c.transportErr = finalErr
 		c.failPending(finalErr)
 		close(c.notifications)
-
-		c.stateMu.RLock()
-		transportDone := c.transportDone
-		c.stateMu.RUnlock()
-		if transportDone != nil {
-			close(transportDone)
-		}
+		close(c.transportDone)
 	})
 }
 
 func (c *Client) transportClosed() error {
-	if err := c.getTransportErr(); err != nil {
-		return err
+	if !c.hasStartedProcess() {
+		return &TransportClosedError{StderrTail: c.stderrTail()}
 	}
 
-	c.stateMu.RLock()
-	transportDone := c.transportDone
-	c.stateMu.RUnlock()
-	if transportDone != nil {
-		<-transportDone
-	}
-	if err := c.getTransportErr(); err != nil {
-		return err
+	<-c.transportDone
+	if c.transportErr != nil {
+		return c.transportErr
 	}
 
 	return &TransportClosedError{StderrTail: c.stderrTail()}
 }
 
 func (c *Client) transportClosedFrom(cause error) error {
-	if err := c.getTransportErr(); err != nil {
-		return err
+	if !c.hasStartedProcess() {
+		return &TransportClosedError{
+			Cause:      cause,
+			StderrTail: c.stderrTail(),
+		}
 	}
 
-	c.waitForTransportDone()
-	if err := c.getTransportErr(); err != nil {
-		return err
+	<-c.transportDone
+	if c.transportErr != nil {
+		return c.transportErr
 	}
 
 	return &TransportClosedError{
@@ -870,95 +574,23 @@ func (c *Client) transportClosedFrom(cause error) error {
 }
 
 func (c *Client) closeStdin() {
-	c.stateMu.Lock()
-	stdin := c.stdin
-	c.stdin = nil
-	c.stateMu.Unlock()
-
-	if stdin != nil {
-		_ = stdin.Close()
+	if c.stdin != nil {
+		_ = c.stdin.Close()
 	}
 }
 
 func (c *Client) requestTransportStop() {
 	c.closeStdin()
 
-	c.stateMu.RLock()
 	cmd := c.cmd
-	c.stateMu.RUnlock()
 
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 }
 
-func (c *Client) markStderrDone() {
-	c.stateMu.RLock()
-	stderrDone := c.stderrDone
-	c.stateMu.RUnlock()
-
-	if stderrDone != nil {
-		close(stderrDone)
-	}
-}
-
-func (c *Client) waitForStderrDrain() {
-	c.stateMu.RLock()
-	stderrDone := c.stderrDone
-	c.stateMu.RUnlock()
-
-	if stderrDone != nil {
-		<-stderrDone
-	}
-}
-
-func (c *Client) waitForTransportDone() {
-	c.stateMu.RLock()
-	transportDone := c.transportDone
-	c.stateMu.RUnlock()
-
-	if transportDone != nil {
-		<-transportDone
-	}
-}
-
-func (c *Client) processExitErr() error {
-	c.stateMu.RLock()
-	processDone := c.processDone
-	c.stateMu.RUnlock()
-
-	if processDone != nil {
-		<-processDone
-	}
-
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	return c.processErr
-}
-
-func (c *Client) setTransportErr(err error) {
-	c.transportErrMu.Lock()
-	defer c.transportErrMu.Unlock()
-	if c.transportErr == nil {
-		c.transportErr = err
-	}
-}
-
-func (c *Client) getTransportErr() error {
-	c.transportErrMu.RLock()
-	defer c.transportErrMu.RUnlock()
-	return c.transportErr
-}
-
-func (c *Client) setProcessErr(err error) {
-	c.stateMu.Lock()
-	c.processErr = err
-	processDone := c.processDone
-	c.stateMu.Unlock()
-
-	if processDone != nil {
-		close(processDone)
-	}
+func (c *Client) hasStartedProcess() bool {
+	return c.cmd != nil
 }
 
 func transportCause(cause error, processErr error) error {
@@ -1009,18 +641,4 @@ func defaultServerRequestHandler(
 	default:
 		return map[string]any{}, nil
 	}
-}
-
-func valueOrEmpty[T any](value *T) any {
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
-}
-
-func mustValue[T any](value *T) any {
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }

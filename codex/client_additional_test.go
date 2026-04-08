@@ -300,10 +300,12 @@ func TestDefaultServerRequestHandler(t *testing.T) {
 
 	ctx := context.Background()
 
-	for _, method := range []string{
+	methods := []string{
 		"item/commandExecution/requestApproval",
 		"item/fileChange/requestApproval",
-	} {
+	}
+	for i := range methods {
+		method := methods[i]
 		result, err := defaultServerRequestHandler(ctx, ServerRequest{Method: method})
 		if err != nil {
 			t.Fatalf("defaultServerRequestHandler(%q) error = %v", method, err)
@@ -388,7 +390,8 @@ func TestInitializeRepeatedCallReturnsServerError(t *testing.T) {
 	methods := logMethods(t, readLogLines(t, logPath))
 	initializeCount := 0
 	initializedCount := 0
-	for _, method := range methods {
+	for i := range methods {
+		method := methods[i]
 		switch method {
 		case "initialize":
 			initializeCount++
